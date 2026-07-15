@@ -29,12 +29,16 @@ struct GatewayConfig {
     long        max_body_bytes   = 8 * 1024 * 1024;  // потолок тела запроса (иначе OOM на json::parse)
     bool        rbac_enabled = true;
     bool        enforce_no_egress = true;
+    bool        require_model_integrity = false;
 
     // runtime: lazy-подъём управляемых бэкендов (модели с пустым backend_url)
     std::string llama_server_bin;            // путь к нашему llama-server (из сборки)
     int         port_range_start   = 8100;
     int         idle_timeout_ms    = 300000;
     int         startup_timeout_ms = 120000;
+    int         max_loaded_models  = 0;
+    int         max_parallel_starts = 1;
+    int         rate_limit_per_minute = 0;     // 0 = disabled; per subject/key after auth
 
     std::vector<std::string> api_keys;   // legacy: плоский список ключей (роль admin)
     std::vector<ModelEntry>  models;

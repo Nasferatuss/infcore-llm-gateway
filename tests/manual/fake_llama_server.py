@@ -65,7 +65,8 @@ class H(BaseHTTPRequestHandler):
             resp = {"id": "chatcmpl-fake", "object": "chat.completion",
                     "model": body.get("model", "?"),
                     "choices": [{"message": {"role": "assistant",
-                                             "content": "pong from " + str(args.port)}}]}
+                                             "content": "pong from " + str(args.port)}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 3, "total_tokens": 4}}
             out = json.dumps(resp, ensure_ascii=False).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json")
             self.end_headers(); self.wfile.write(out)

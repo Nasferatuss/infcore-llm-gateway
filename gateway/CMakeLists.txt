@@ -40,6 +40,7 @@ target_link_libraries(infcore_gateway PRIVATE
     infcore_registry
     infcore_runtime       # lazy-supervisor дочерних llama-server
     cpp-httplib           # vendored HTTP сервер/клиент (REST + прокси)
+    OpenSSL::Crypto       # model artifact SHA-256 validation
 )
 
 install(TARGETS infcore_gateway RUNTIME)

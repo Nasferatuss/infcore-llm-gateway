@@ -24,10 +24,19 @@ struct AuditEvent {
     std::string role;
     std::string endpoint;
     std::string model;
+    std::string model_sha256;
+    std::string request_id;
+    std::string backend_id;
     std::string client_ip;
-    std::string decision;   // "allow" | "deny"
+    std::string decision;   // "allow" | "deny" | "error"
     std::string reason;
     int         status = 0;
+    long long   latency_ms = -1;
+    long long   request_bytes = -1;
+    long long   response_bytes = -1;
+    long long   prompt_tokens = -1;
+    long long   completion_tokens = -1;
+    long long   total_tokens = -1;
 };
 
 class AuditLog {

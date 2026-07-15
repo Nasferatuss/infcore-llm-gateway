@@ -20,6 +20,12 @@ struct ModelEntry {
     std::string backend_url;    // базовый URL бэкенда llama-server, напр. http://127.0.0.1:8081
     std::string upstream_model; // имя модели на бэкенде (если отличается); по умолч. = logical_name
     std::string mmproj_path;    // проектор mtmd для vision (--mmproj); обязателен для этой модальности
+    std::string sha256;         // ожидаемый SHA-256 GGUF (release integrity gate)
+    std::string mmproj_sha256;  // ожидаемый SHA-256 mmproj
+    std::string license;        // provenance/license metadata для release manifest
+    std::string source;         // provenance/source metadata для release manifest
+    int64_t     size_bytes = 0;
+    int64_t     mmproj_size_bytes = 0;
     Modality    modality = Modality::Text;
     bool        enabled  = true;
     int32_t     n_ctx        = 8192;

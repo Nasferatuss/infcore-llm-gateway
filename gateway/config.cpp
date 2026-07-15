@@ -4,10 +4,13 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <sys/stat.h>
 
+#include <openssl/evp.h>
 #include "nlohmann/json.hpp"
 
 #include "json_schema.hpp"
@@ -57,6 +60,69 @@ static bool weak_secret(const std::string& key) {
     for (const char* b : bad)
         if (lower.find(b) != std::string::npos) return true;
     return false;
+}
+
+static std::string sha256_file(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) throw std::runtime_error("infcore: не удалось открыть artifact для sha256: " + path);
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) throw std::runtime_error("infcore: EVP_MD_CTX_new failed");
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
+        EVP_MD_CTX_free(ctx);
+        throw std::runtime_error("infcore: EVP_DigestInit_ex sha256 failed");
+    }
+    char buf[64 * 1024];
+    while (f.good()) {
+        f.read(buf, sizeof(buf));
+        std::streamsize n = f.gcount();
+        if (n > 0 && EVP_DigestUpdate(ctx, buf, static_cast<size_t>(n)) != 1) {
+            EVP_MD_CTX_free(ctx);
+            throw std::runtime_error("infcore: EVP_DigestUpdate sha256 failed: " + path);
+        }
+    }
+    unsigned char out[EVP_MAX_MD_SIZE];
+    unsigned int out_len = 0;
+    if (EVP_DigestFinal_ex(ctx, out, &out_len) != 1) {
+        EVP_MD_CTX_free(ctx);
+        throw std::runtime_error("infcore: EVP_DigestFinal_ex sha256 failed: " + path);
+    }
+    EVP_MD_CTX_free(ctx);
+    static const char* hx = "0123456789abcdef";
+    std::string s;
+    s.reserve(out_len * 2);
+    for (unsigned int i = 0; i < out_len; ++i) {
+        unsigned char c = out[i];
+        s.push_back(hx[c >> 4]);
+        s.push_back(hx[c & 0x0f]);
+    }
+    return s;
+}
+
+static void validate_artifact_integrity(const std::string& path, const std::string& sha256,
+                                        int64_t size_bytes, bool required,
+                                        const std::string& label) {
+    const bool check = required || !sha256.empty() || size_bytes > 0;
+    if (!check) return;
+    if (path.empty())
+        throw std::runtime_error("infcore: " + label + " требует path для integrity validation");
+    if (required && sha256.empty())
+        throw std::runtime_error("infcore: " + label + " требует sha256 при require_model_integrity=true");
+    if (required && size_bytes <= 0)
+        throw std::runtime_error("infcore: " + label + " требует size_bytes при require_model_integrity=true");
+    struct stat st {};
+    if (stat(path.c_str(), &st) != 0)
+        throw std::runtime_error("infcore: не удалось stat artifact " + label + ": " + path);
+    if (!S_ISREG(st.st_mode))
+        throw std::runtime_error("infcore: artifact не является regular file " + label + ": " + path);
+    if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0)
+        throw std::runtime_error("infcore: artifact writable для group/other " + label + ": " + path);
+    if (size_bytes > 0 && static_cast<int64_t>(st.st_size) != size_bytes)
+        throw std::runtime_error("infcore: size mismatch для " + label + ": " + path);
+    if (!sha256.empty()) {
+        const std::string got = sha256_file(path);
+        if (got != sha256)
+            throw std::runtime_error("infcore: sha256 mismatch для " + label + ": " + path);
+    }
 }
 
 // Строгий разбор dotted-quad IPv4: ровно 4 числовых октета 0..255, без лишних
@@ -206,6 +272,8 @@ GatewayConfig load_config(const std::string& path) {
     }
     if (j.contains("offline"))
         cfg.enforce_no_egress = j.at("offline").value("enforce_no_egress", true);
+    if (j.contains("offline"))
+        cfg.require_model_integrity = j.at("offline").value("require_model_integrity", cfg.require_model_integrity);
 
     if (j.contains("observability")) {
         const auto& o = j.at("observability");
@@ -221,6 +289,9 @@ GatewayConfig load_config(const std::string& path) {
         cfg.port_range_start   = r.value("port_range_start", cfg.port_range_start);
         cfg.idle_timeout_ms    = r.value("idle_timeout_ms", cfg.idle_timeout_ms);
         cfg.startup_timeout_ms = r.value("startup_timeout_ms", cfg.startup_timeout_ms);
+        cfg.max_loaded_models  = r.value("max_loaded_models", cfg.max_loaded_models);
+        cfg.max_parallel_starts = r.value("max_parallel_starts", cfg.max_parallel_starts);
+        cfg.rate_limit_per_minute = r.value("rate_limit_per_minute", cfg.rate_limit_per_minute);
     }
 
     if (j.contains("models")) {
@@ -232,6 +303,12 @@ GatewayConfig load_config(const std::string& path) {
             e.backend_url    = m.value("backend_url", std::string());
             e.upstream_model = m.value("upstream_model", e.logical_name);
             e.mmproj_path    = m.value("mmproj_path", std::string());
+            e.sha256         = m.value("sha256", std::string());
+            e.mmproj_sha256  = m.value("mmproj_sha256", std::string());
+            e.license        = m.value("license", std::string());
+            e.source         = m.value("source", std::string());
+            e.size_bytes     = m.value("size_bytes", int64_t{0});
+            e.mmproj_size_bytes = m.value("mmproj_size_bytes", int64_t{0});
             e.modality       = parse_modality(m.value("modality", std::string("text")));
             e.enabled        = m.value("enabled", true);
             e.n_ctx          = m.value("n_ctx", 8192);
@@ -320,6 +397,13 @@ GatewayConfig load_config(const std::string& path) {
         if (rerank && m.n_ctx < 512)
             throw std::runtime_error("infcore: модель '" + m.logical_name +
                 "' модальности rerank требует n_ctx >= 512");
+        validate_artifact_integrity(m.gguf_path, m.sha256, m.size_bytes,
+                                    cfg.require_model_integrity,
+                                    "model '" + m.logical_name + "'");
+        if (!m.mmproj_path.empty())
+            validate_artifact_integrity(m.mmproj_path, m.mmproj_sha256, m.mmproj_size_bytes,
+                                        cfg.require_model_integrity,
+                                        "mmproj '" + m.logical_name + "'");
     }
 
     return cfg;

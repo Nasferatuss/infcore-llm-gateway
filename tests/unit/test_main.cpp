@@ -109,6 +109,9 @@ static bool load_throws(const std::string& body) {
 }
 
 static void test_config() {
+    {
+      std::ofstream("infcore_test_model.gguf", std::ios::binary) << "abc";
+    }
     const char* valid = R"({
       "server": {"host":"127.0.0.1","port":8080},
       "security": {"rbac_enabled":true,
@@ -198,7 +201,38 @@ static void test_config() {
         "roles":[{"name":"admin","allow_models":["missing"],"allow_endpoints":["*"]}]},
       "models":[{"logical_name":"m","backend_url":"http://127.0.0.1:9"}]})"));
 
+    // release integrity gate: sha256 + size_bytes для managed model
+    {
+      bool ok = true;
+      try { infcore::load_config(write_tmp(R"({"server":{"host":"127.0.0.1","port":8080},
+        "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
+          "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
+        "offline":{"require_model_integrity":true},
+        "runtime":{"llama_server_bin":"/bin/true"},
+        "models":[{"logical_name":"m","gguf_path":"infcore_test_model.gguf",
+          "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "size_bytes":3}]})")); }
+      catch (...) { ok = false; }
+      CHECK(ok);
+    }
+
+    CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
+      "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
+        "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
+      "offline":{"require_model_integrity":true},
+      "runtime":{"llama_server_bin":"/bin/true"},
+      "models":[{"logical_name":"m","gguf_path":"infcore_test_model.gguf"}]})"));
+
+    CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
+      "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
+        "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
+      "runtime":{"llama_server_bin":"/bin/true"},
+      "models":[{"logical_name":"m","gguf_path":"infcore_test_model.gguf",
+        "sha256":"0000000000000000000000000000000000000000000000000000000000000000",
+        "size_bytes":3}]})"));
+
     std::remove("infcore_test_cfg.json");
+    std::remove("infcore_test_model.gguf");
 }
 
 static void test_supervisor_token_failure() {

@@ -47,6 +47,7 @@ runtime/                 lazy-supervisor дочерних llama-server
 sdk/python/              клиентский SDK (stdlib-клиент REST)
 config/                  конфиги + JSON-Schema
 deploy/                  docker / compose / systemd (РФ-образы)
+scripts/release-manifest.sh  release manifest + SHA256SUMS (+ optional GPG signatures)
 tests/unit/              ctest: RBAC / authn / json-schema / config / supervisor token failure
 tests/egress/            проверка нулевого egress + product smoke в netns
 docs/                    STATUS, ARCHITECTURE, COMPLIANCE, DEPLOY

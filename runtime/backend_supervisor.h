@@ -25,6 +25,8 @@ public:
         int idle_timeout_ms   = 300000;        // простой до выгрузки
         int startup_timeout_ms = 120000;       // ожидание /health при старте
         std::string backend_token_path = "/dev/urandom";
+        int max_loaded_models = 0;             // 0 = unlimited
+        int max_parallel_starts = 1;           // admission control for expensive loads
     };
 
     explicit BackendSupervisor(Options opt);
@@ -72,6 +74,7 @@ private:
     };
 
     Backend& get_or_create(const std::string& logical_name);  // mu_ удерживается вызывающим
+    int loaded_count_locked() const;           // Ready/Starting models, mu_ удерживается вызывающим
     bool spawn(const ModelEntry& e, int port, pid_t& out_pid, std::string& err);  // fork+exec, без блокировки mu_
     bool wait_health(int port);          // поллит /health до startup_timeout_ms
     // SIGTERM -> SIGKILL, waitpid. Освобождает переданный lock на время ожидания
@@ -85,6 +88,7 @@ private:
     std::mutex  mu_;
     std::map<std::string, std::unique_ptr<Backend>> backends_;
     int         next_port_;
+    int         starts_in_flight_ = 0;
     std::thread reaper_;
     bool        stop_ = false;
     std::condition_variable reaper_cv_;

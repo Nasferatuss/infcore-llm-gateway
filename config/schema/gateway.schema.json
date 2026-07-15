@@ -84,7 +84,8 @@
       "additionalProperties": false,
       "description": "Жёсткий offline-режим: запрет любых исходящих соединений в рантайме.",
       "properties": {
-        "enforce_no_egress": { "type": "boolean", "default": true }
+        "enforce_no_egress": { "type": "boolean", "default": true },
+        "require_model_integrity": { "type": "boolean", "default": false, "description": "Release gate: managed model artifacts must declare and match sha256 + size_bytes" }
       }
     },
     "runtime": {
@@ -95,7 +96,10 @@
         "llama_server_bin": { "type": "string", "description": "Путь к llama-server из нашей сборки" },
         "port_range_start": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 8100 },
         "idle_timeout_ms": { "type": "integer", "minimum": 0, "default": 300000 },
-        "startup_timeout_ms": { "type": "integer", "minimum": 0, "default": 120000 }
+        "startup_timeout_ms": { "type": "integer", "minimum": 0, "default": 120000 },
+        "max_loaded_models": { "type": "integer", "minimum": 0, "default": 0, "description": "0 = unlimited; admission control for managed backends" },
+        "max_parallel_starts": { "type": "integer", "minimum": 0, "default": 1, "description": "0 = unlimited; admission control for expensive model starts" },
+        "rate_limit_per_minute": { "type": "integer", "minimum": 0, "default": 0, "description": "0 = disabled; per authenticated subject" }
       }
     }
   },
@@ -114,7 +118,13 @@
         "enabled": { "type": "boolean", "default": true },
         "n_ctx": { "type": "integer", "minimum": 512, "default": 8192 },
         "n_gpu_layers": { "type": "integer", "minimum": 0, "default": 0 },
-        "mmproj_path": { "type": "string", "description": "Проектор для vision (mtmd), если применимо" }
+        "mmproj_path": { "type": "string", "description": "Проектор для vision (mtmd), если применимо" },
+        "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$", "description": "Expected SHA-256 of gguf_path" },
+        "size_bytes": { "type": "integer", "minimum": 1, "description": "Expected byte size of gguf_path" },
+        "mmproj_sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$", "description": "Expected SHA-256 of mmproj_path" },
+        "mmproj_size_bytes": { "type": "integer", "minimum": 1, "description": "Expected byte size of mmproj_path" },
+        "license": { "type": "string", "description": "Model license/provenance label" },
+        "source": { "type": "string", "description": "Model source/provenance label" }
       }
     }
   }

@@ -34,10 +34,17 @@
     "audit": { "sink": "file", "path": "/var/log/infcore/audit.log", "require": true }
   },
   "observability": { "metrics_enabled": true, "metrics_path": "/metrics" },
-  "offline": { "enforce_no_egress": true },
+  "offline": {
+    "enforce_no_egress": true,
+    // Для финального релизного конфига поставьте true и заполните sha256/size_bytes у моделей.
+    "require_model_integrity": false
+  },
   "runtime": {
     "llama_server_bin": "/opt/infcore/bin/llama-server",
     "port_range_start": 8100,
+    "max_loaded_models": 2,
+    "max_parallel_starts": 1,
+    "rate_limit_per_minute": 0,
     "idle_timeout_ms": 300000,
     "startup_timeout_ms": 120000
   },
@@ -46,6 +53,8 @@
       "logical_name": "qwen3-moe-a3b",
       "gguf_path": "/opt/infcore/models/qwen3-moe-a3b-Q4_K_M.gguf",
       "arch": "qwen3moe",
+      "license": "model-license-id",
+      "source": "internal-model-registry/qwen3-moe-a3b",
       "modality": "text",
       "enabled": true,
       "n_ctx": 8192,
@@ -54,6 +63,8 @@
     {
       "logical_name": "bge-m3-embed",
       "gguf_path": "/opt/infcore/models/bge-m3-Q8_0.gguf",
+      "license": "model-license-id",
+      "source": "internal-model-registry/bge-m3",
       "modality": "embedding",
       "enabled": false,
       "n_ctx": 8192
@@ -61,6 +72,8 @@
     {
       "logical_name": "bge-reranker",
       "gguf_path": "/opt/infcore/models/bge-reranker-v2-m3-Q8_0.gguf",
+      "license": "model-license-id",
+      "source": "internal-model-registry/bge-reranker-v2-m3",
       "modality": "rerank",
       "enabled": false,
       "n_ctx": 8192

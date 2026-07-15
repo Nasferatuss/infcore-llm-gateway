@@ -51,13 +51,22 @@ void AuditLog::log(const AuditEvent& e) {
         {"ts", utc_now()},
         {"subject", e.subject},
         {"role", e.role},
+        {"request_id", e.request_id},
         {"endpoint", e.endpoint},
         {"model", e.model},
+        {"model_sha256", e.model_sha256},
+        {"backend_id", e.backend_id},
         {"client_ip", e.client_ip},
         {"decision", e.decision},
         {"reason", e.reason},
         {"status", e.status},
     };
+    if (e.latency_ms >= 0) j["latency_ms"] = e.latency_ms;
+    if (e.request_bytes >= 0) j["request_bytes"] = e.request_bytes;
+    if (e.response_bytes >= 0) j["response_bytes"] = e.response_bytes;
+    if (e.prompt_tokens >= 0) j["prompt_tokens"] = e.prompt_tokens;
+    if (e.completion_tokens >= 0) j["completion_tokens"] = e.completion_tokens;
+    if (e.total_tokens >= 0) j["total_tokens"] = e.total_tokens;
     std::string line = j.dump();
     line.push_back('\n');
 

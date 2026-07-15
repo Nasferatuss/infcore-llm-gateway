@@ -106,6 +106,15 @@ BackendSupervisor::Backend& BackendSupervisor::get_or_create(const std::string& 
     return *it->second;
 }
 
+int BackendSupervisor::loaded_count_locked() const {
+    int n = 0;
+    for (const auto& kv : backends_) {
+        const State s = kv.second->state;
+        if (s == State::Ready || s == State::Starting) ++n;
+    }
+    return n;
+}
+
 bool BackendSupervisor::wait_health(int port) {
     httplib::Client cli("127.0.0.1", port);
     cli.set_connection_timeout(1, 0);
@@ -233,12 +242,21 @@ std::string BackendSupervisor::ensure_ready(const ModelEntry& e, std::string& er
                 continue;
             case State::Stopped: {
                 if (now_ms() < b.retry_after_ms) { err = b.last_error; return std::string(); }
+                if (opt_.max_loaded_models > 0 && loaded_count_locked() >= opt_.max_loaded_models) {
+                    err = "capacity exceeded: max_loaded_models";
+                    return std::string();
+                }
+                if (opt_.max_parallel_starts > 0 && starts_in_flight_ >= opt_.max_parallel_starts) {
+                    err = "capacity exceeded: max_parallel_starts";
+                    return std::string();
+                }
                 if (b.port == 0) {                       // порт назначаем под mu_ (без гонки)
                     b.port = next_port_++;
                     if (next_port_ > opt_.port_range_start + 1000) next_port_ = opt_.port_range_start;
                 }
                 b.stop_requested = false;                // новый старт отменяет прежний запрос на стоп
                 b.state = State::Starting;
+                ++starts_in_flight_;
                 const int port = b.port;
                 std::string serr;
                 lock.unlock();  // fork + поллинг /health без блокировки остальных моделей
@@ -246,6 +264,7 @@ std::string BackendSupervisor::ensure_ready(const ModelEntry& e, std::string& er
                 bool ok = spawn(e, port, pid, serr);
                 if (ok) ok = wait_health(port);
                 lock.lock();
+                if (starts_in_flight_ > 0) --starts_in_flight_;
                 b.pid = pid;  // присваиваем под mu_ (reaper читает pid под mu_)
                 if (ok && b.stop_requested) {
                     // disable пришёл, пока бэкенд стартовал (тогда pid был -1 и гасить было

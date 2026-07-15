@@ -26,6 +26,10 @@ infcore **построен на базе open-source llama.cpp (ggml authors, MI
 UPSTREAM_COMMIT в purl). Docker runtime image также включает корневой `LICENSE` как
 `/opt/infcore/LICENSE.llama.cpp`. Пин версии апстрима — `UPSTREAM_COMMIT` (корень форка).
 
+Для релиза запускается `infcore/scripts/release-manifest.sh`: он генерирует
+`release-manifest.json` и `SHA256SUMS` для бинарей, лицензий и SBOM. При
+`INFCORE_SIGN=1` дополнительно создаются detached GPG signatures.
+
 ## Модель неприкосновенности движка
 Файлы вне `infcore/` (движок) руками не редактируются. Обновление — только слиянием
 release-тега апстрима (`scripts/update-upstream.sh`). Это сохраняет чистоту границы,

@@ -82,12 +82,17 @@ cmake --build build -j"$(nproc)"
     значения по умолчанию можно оставить как есть.
 - `security` - principals (ключ -> subject/role), roles (allowlists), audit.
 - `runtime` - `llama_server_bin` (путь к llama-server), `port_range_start` (порты
-  под управляемые модели), таймауты простоя/старта.
+  под управляемые модели), admission controls (`max_loaded_models`,
+  `max_parallel_starts`, `rate_limit_per_minute`), таймауты простоя/старта.
 - `models` - каталог моделей (logical_name, gguf_path, modality, n_ctx, n_gpu_layers,
   `mmproj_path`). Для управляемых моделей модальности `vision` поле
   `mmproj_path` (проектор mtmd) ОБЯЗАТЕЛЬНО - иначе fail-fast при старте. Для
   `rerank` gateway стартует backend с `llama-server --reranking` и проксирует
   `/v1/rerank`, `/v1/reranking`, `/rerank`, `/reranking`.
+- `offline.require_model_integrity` - release gate для моделей. При `true` каждая
+  управляемая модель обязана объявить `sha256` и `size_bytes`; gateway проверит
+  regular-file, права (не writable для group/other), размер и SHA-256 перед стартом.
+  Если gate выключен, указанные `sha256`/`size_bytes` всё равно проверяются.
 
 В Docker шлюз должен слушать `0.0.0.0` (наружу публикуется только `127.0.0.1:8080`).
 Не редактируйте смонтированный read-only конфиг — задайте переменные окружения
@@ -126,6 +131,11 @@ cmake --build build -j"$(nproc)"
 
 Веса (`.gguf`) в образ не зашиваются - монтируются томом (`/opt/infcore/models`,
 read-only). Путь в `gguf_path` должен совпадать с точкой монтирования.
+
+Для финального релиза заполните provenance-поля модели:
+- `sha256`, `size_bytes` - контроль целостности artifact;
+- `license`, `source` - происхождение и лицензия модели для release manifest;
+- `mmproj_sha256`, `mmproj_size_bytes` - то же для vision projector, если есть.
 
 ## 5. Порты
 
@@ -175,6 +185,10 @@ docker compose up -d
 питания. Запись вынесена в отдельный поток-писатель с **group-commit**: параллельные
 запросы делят один `fsync`, поэтому флуд (в т.ч. отказы 401/403) не сериализуется на
 диске и не становится вектором DoS. Каталог должен быть на запись пользователю сервиса.
+Каждое событие содержит `request_id`, `subject`, `role`, `endpoint`, `model`,
+`model_sha256`, `backend_id`, `client_ip`, `decision`, `status`; для proxy-запросов
+дополнительно пишутся `latency_ms`, request/response bytes и token usage, если
+backend вернул OpenAI-compatible `usage`.
 
 Для неизменяемости (требование контура) на стороне ОС:
 ```sh
@@ -215,6 +229,20 @@ curl -s $INFCORE_URL/health                          # {"status":"ok",...}
 Обновления оригинального llama.cpp забираются скриптом
 `infcore/scripts/update-upstream.sh` (по release-тегам). Слой `infcore/` при этом не
 конфликтует. После обновления - пересобрать и прогнать дымовой тест.
+
+## 9.1 Release manifest
+
+После сборки сгенерируйте проверяемые артефакты релиза:
+
+```sh
+./infcore/scripts/release-manifest.sh build dist/infcore
+# optional detached signatures:
+INFCORE_SIGN=1 ./infcore/scripts/release-manifest.sh build dist/infcore
+```
+
+Скрипт проверяет наличие `infcore_gateway`, `infcore-cli`, `llama-server`, лицензий и
+SBOM, затем пишет `release-manifest.json` и `SHA256SUMS`. При `INFCORE_SIGN=1`
+создаются detached GPG signatures.
 
 ## 10. Offline-инвариант
 

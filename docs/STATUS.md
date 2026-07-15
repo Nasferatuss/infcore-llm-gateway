@@ -63,6 +63,9 @@ remotes: `origin`=Nasferatuss/llama.cpp, `upstream`=ggml-org/llama.cpp.
 - **RBAC + audit:** доступ роль -> модель/эндпоинт (allow_endpoints, в т.ч. для
   `/v1/models`); audit пишет и отказы (400/404/409/502), и реальный статус бэкенда.
 - **JSON-Schema валидация конфига** при старте (fail-fast).
+- **Release gates:** `offline.require_model_integrity` проверяет SHA-256/размер/права
+  model artifacts; `runtime.max_loaded_models`, `max_parallel_starts` и
+  `rate_limit_per_minute` дают базовый admission control.
 - **SSE hardening:** статус апстрима проверяется ДО коммита стрима; не-2xx бэкенд
   возвращается обычным JSON-ошибкой (OpenAI shape), а не SSE внутри 200; синтетические
   ошибки завершают стрим `data: [DONE]`.
@@ -75,10 +78,12 @@ remotes: `origin`=Nasferatuss/llama.cpp, `upstream`=ggml-org/llama.cpp.
 - **CLI + админ-ручка** `/admin/models`.
 - **Deploy-пакет** (`infcore/deploy/`): docker/compose/systemd под РФ-контур,
   kernel-level egress deny (systemd `IPAddressDeny=any`), docker `internal: true`.
+- **Audit:** JSONL append-only с `request_id`, subject/role, endpoint/model,
+  `model_sha256`, backend_id, outcome/status, latency/bytes и token usage при наличии `usage`.
 - **Тесты + CI:** ctest unit-тесты (`infcore/tests/unit`: RBAC/authn/json-schema/
   config/supervisor token failure), product egress-тест (`infcore/tests/egress`,
   netns-based, real gateway + fake managed backend when `INFCORE_GATEWAY_BIN` is set),
-  `.github/workflows/infcore.yml` и `.gitlab-ci.yml`.
+  release manifest smoke, `.github/workflows/infcore.yml` и `.gitlab-ci.yml`.
 
 ## 5. Технические «грабли» (важно)
 - `tools/ui` физически удалять НЕЛЬЗЯ — ломает сборку сервера; только флаги UI=OFF.

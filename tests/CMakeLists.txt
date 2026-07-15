@@ -19,6 +19,11 @@ target_include_directories(infcore_unit_tests PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}             # schema_embedded.h
     ${INFCORE_LLAMA_ROOT}/vendor            # nlohmann/json.hpp
 )
-target_link_libraries(infcore_unit_tests PRIVATE infcore_security infcore_registry infcore_runtime)
+target_link_libraries(infcore_unit_tests PRIVATE
+    infcore_security
+    infcore_registry
+    infcore_runtime
+    OpenSSL::Crypto
+)
 
 add_test(NAME infcore_unit COMMAND infcore_unit_tests)

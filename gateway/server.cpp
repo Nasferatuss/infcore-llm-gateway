@@ -1,6 +1,8 @@
 // infcore gateway — корпоративная лицензия.
 #include "server.hpp"
 
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <cstdio>
@@ -25,6 +27,8 @@ GatewayServer::GatewayServer(GatewayConfig cfg) : cfg_(std::move(cfg)) {
     opt.port_range_start   = cfg_.port_range_start;
     opt.idle_timeout_ms    = cfg_.idle_timeout_ms;
     opt.startup_timeout_ms = cfg_.startup_timeout_ms;
+    opt.max_loaded_models  = cfg_.max_loaded_models;
+    opt.max_parallel_starts = cfg_.max_parallel_starts;
     supervisor_ = std::make_unique<BackendSupervisor>(opt);
 
     // RBAC: роли из конфига; principals -> ключи.
@@ -59,16 +63,41 @@ GatewayServer::GatewayServer(GatewayConfig cfg) : cfg_(std::move(cfg)) {
 
 void GatewayServer::audit_event(const Principal& pr, const std::string& client_ip,
                                 const std::string& endpoint, const std::string& model,
-                                const char* decision, const std::string& reason, int status) {
+                                const char* decision, const std::string& reason, int status,
+                                const std::string& request_id,
+                                const std::string& backend_id,
+                                const std::string& model_sha256,
+                                long long latency_ms,
+                                long long request_bytes,
+                                long long response_bytes,
+                                long long prompt_tokens,
+                                long long completion_tokens,
+                                long long total_tokens) {
     AuditEvent ev;
     ev.subject = pr.subject;
     ev.role = pr.role;
+    if (request_id.empty()) {
+        static std::atomic<unsigned long long> audit_seq{0};
+        using namespace std::chrono;
+        const auto ms = duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+        ev.request_id = "req-" + std::to_string(ms) + "-" + std::to_string(++audit_seq);
+    } else {
+        ev.request_id = request_id;
+    }
     ev.endpoint = endpoint;
     ev.model = model;
+    ev.model_sha256 = model_sha256;
+    ev.backend_id = backend_id;
     ev.client_ip = client_ip;
     ev.decision = decision;
     ev.reason = reason;
     ev.status = status;
+    ev.latency_ms = latency_ms;
+    ev.request_bytes = request_bytes;
+    ev.response_bytes = response_bytes;
+    ev.prompt_tokens = prompt_tokens;
+    ev.completion_tokens = completion_tokens;
+    ev.total_tokens = total_tokens;
     audit_.log(ev);
 }
 
@@ -87,6 +116,25 @@ std::string GatewayServer::render_metrics() {
         os << "infcore_gateway_" << kv.first << " "
            << kv.second.load(std::memory_order_relaxed) << "\n";
     return os.str();
+}
+
+bool GatewayServer::allow_rate(const Principal& pr, std::string& reason) {
+    if (cfg_.rate_limit_per_minute <= 0) return true;
+    const std::string key = !pr.subject.empty() ? pr.subject : pr.role;
+    using namespace std::chrono;
+    const long long now = duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+    std::lock_guard<std::mutex> lock(rate_mu_);
+    RateState& st = rate_[key];
+    if (st.window_start_ms == 0 || now - st.window_start_ms >= 60000) {
+        st.window_start_ms = now;
+        st.count = 0;
+    }
+    if (st.count >= cfg_.rate_limit_per_minute) {
+        reason = "rate limit exceeded";
+        return false;
+    }
+    ++st.count;
+    return true;
 }
 
 // --- helpers -----------------------------------------------------------------
@@ -116,6 +164,28 @@ bool endpoint_accepts_modality(const std::string& path, Modality m) {
     return m == Modality::Text || m == Modality::Vision;
 }
 
+long long steady_ms() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+std::string make_request_id() {
+    static std::atomic<unsigned long long> seq{0};
+    return "req-" + std::to_string(steady_ms()) + "-" + std::to_string(++seq);
+}
+
+void extract_usage(const std::string& body, long long& prompt, long long& completion, long long& total) {
+    json j = json::parse(body, nullptr, false);
+    if (j.is_discarded() || !j.contains("usage") || !j["usage"].is_object()) return;
+    const auto& u = j["usage"];
+    if (u.contains("prompt_tokens") && u["prompt_tokens"].is_number_integer())
+        prompt = u["prompt_tokens"].get<long long>();
+    if (u.contains("completion_tokens") && u["completion_tokens"].is_number_integer())
+        completion = u["completion_tokens"].get<long long>();
+    if (u.contains("total_tokens") && u["total_tokens"].is_number_integer())
+        total = u["total_tokens"].get<long long>();
+}
+
 // Разделяемое состояние SSE-прокси: фоновый поток тянет ответ бэкенда, а
 // content-provider downstream отдаёт байты клиенту. Статус бэкенда становится
 // известен (headers_ready) ДО коммита стрим-ответа - так мы можем вернуть
@@ -129,6 +199,7 @@ struct StreamPump {
     bool done = false;
     bool ok = false;             // send() дошёл без транспортной ошибки
     bool consumer_gone = false;  // клиент отвалился -> прекращаем тянуть бэкенд
+    size_t bytes_total = 0;
 };
 
 // Штатная остановка по сигналу: на гибель от сигнала C++ деструкторы не вызываются,
@@ -203,6 +274,9 @@ int GatewayServer::run() {
             audit_event({}, req.remote_addr, "/v1/models", "", "deny", "unauthorized", 401);
             return error_json(res, 401, "invalid_request_error", "unauthorized"); }
         std::string reason;
+        if (!allow_rate(pr, reason)) { inc("errors_total{type=\"rate_limited\"}");
+            audit_event(pr, req.remote_addr, "/v1/models", "", "deny", reason, 429);
+            return error_json(res, 429, "rate_limit_error", reason, "rate_limit_exceeded"); }
         if (!rbac_.allow(pr.role, "/v1/models", "", reason)) { inc("errors_total{type=\"forbidden\"}");
             audit_event(pr, req.remote_addr, "/v1/models", "", "deny", reason, 403);
             return error_json(res, 403, "invalid_request_error", "forbidden: " + reason); }
@@ -227,6 +301,9 @@ int GatewayServer::run() {
             audit_event({}, req.remote_addr, "/admin/models", "", "deny", "unauthorized", 401);
             return error_json(res, 401, "invalid_request_error", "unauthorized"); }
         std::string reason;
+        if (!allow_rate(pr, reason)) { inc("errors_total{type=\"rate_limited\"}");
+            audit_event(pr, req.remote_addr, "/admin/models", "", "deny", reason, 429);
+            return error_json(res, 429, "rate_limit_error", reason, "rate_limit_exceeded"); }
         if (!rbac_.allow(pr.role, "/admin/models", "", reason)) { inc("errors_total{type=\"forbidden\"}");
             audit_event(pr, req.remote_addr, "/admin/models", "", "deny", reason, 403);
             return error_json(res, 403, "invalid_request_error", "forbidden: " + reason); }
@@ -247,6 +324,9 @@ int GatewayServer::run() {
             audit_event({}, req.remote_addr, "/admin/models", "", "deny", "unauthorized", 401);
             return error_json(res, 401, "invalid_request_error", "unauthorized"); }
         std::string reason;
+        if (!allow_rate(pr, reason)) { inc("errors_total{type=\"rate_limited\"}");
+            audit_event(pr, req.remote_addr, "/admin/models", "", "deny", reason, 429);
+            return error_json(res, 429, "rate_limit_error", reason, "rate_limit_exceeded"); }
         if (!rbac_.allow(pr.role, "/admin/models", "", reason)) { inc("errors_total{type=\"forbidden\"}");
             audit_event(pr, req.remote_addr, "/admin/models", "", "deny", reason, 403);
             return error_json(res, 403, "invalid_request_error", "forbidden: " + reason); }
@@ -269,36 +349,42 @@ int GatewayServer::run() {
     auto proxy = [this](const char* upstream_path, bool allow_stream) {
         return [this, upstream_path, allow_stream](const httplib::Request& req,
                                                    httplib::Response& res) {
+            const std::string request_id = make_request_id();
+            const long long started_ms = steady_ms();
             inc(std::string("requests_total{path=\"") + upstream_path + "\"}");
             Principal pr;
             if (!authn_.verify(auth_token(req), pr)) { inc("errors_total{type=\"unauthorized\"}");
-                audit_event({}, req.remote_addr, upstream_path, "", "deny", "unauthorized", 401);
+                audit_event({}, req.remote_addr, upstream_path, "", "deny", "unauthorized", 401, request_id);
                 return error_json(res, 401, "invalid_request_error", "unauthorized"); }
+            std::string rate_reason;
+            if (!allow_rate(pr, rate_reason)) { inc("errors_total{type=\"rate_limited\"}");
+                audit_event(pr, req.remote_addr, upstream_path, "", "deny", rate_reason, 429, request_id);
+                return error_json(res, 429, "rate_limit_error", rate_reason, "rate_limit_exceeded"); }
 
             const std::string client_ip = req.remote_addr;
 
             json body;
             try { body = json::parse(req.body); }
             catch (...) { inc("errors_total{type=\"bad_request\"}");
-                audit_event(pr, client_ip, upstream_path, "", "deny", "invalid JSON", 400);
+                audit_event(pr, client_ip, upstream_path, "", "deny", "invalid JSON", 400, request_id);
                 return error_json(res, 400, "invalid_request_error", "невалидный JSON"); }
 
             if (!body.contains("model") || !body.at("model").is_string()) {
                 inc("errors_total{type=\"bad_request\"}");
-                audit_event(pr, client_ip, upstream_path, "", "deny", "model must be a string", 400);
+                audit_event(pr, client_ip, upstream_path, "", "deny", "model must be a string", 400, request_id);
                 return error_json(res, 400, "invalid_request_error", "field 'model' must be a string", "invalid_type");
             }
             const std::string model = body.at("model").get<std::string>();
             ModelEntry e;
             if (model.empty() || !registry_.get(model, e)) { inc("errors_total{type=\"model_not_found\"}");
-                audit_event(pr, client_ip, upstream_path, model, "deny", "model not found", 404);
+                audit_event(pr, client_ip, upstream_path, model, "deny", "model not found", 404, request_id);
                 return error_json(res, 404, "invalid_request_error", "model not found: " + model, "model_not_found"); }
             if (!e.enabled) { inc("errors_total{type=\"model_disabled\"}");
-                audit_event(pr, client_ip, upstream_path, model, "deny", "model disabled", 409);
+                audit_event(pr, client_ip, upstream_path, model, "deny", "model disabled", 409, request_id);
                 return error_json(res, 409, "invalid_request_error", "model disabled: " + model, "model_disabled"); }
             if (!endpoint_accepts_modality(upstream_path, e.modality)) {
                 inc("errors_total{type=\"wrong_modality\"}");
-                audit_event(pr, client_ip, upstream_path, model, "deny", "wrong model modality", 400);
+                audit_event(pr, client_ip, upstream_path, model, "deny", "wrong model modality", 400, request_id);
                 return error_json(res, 400, "invalid_request_error",
                                   "model '" + model + "' does not support endpoint " + upstream_path,
                                   "wrong_modality");
@@ -308,7 +394,7 @@ int GatewayServer::run() {
             std::string reason;
             if (!rbac_.allow(pr.role, upstream_path, model, reason)) {
                 inc("errors_total{type=\"forbidden\"}");
-                audit_event(pr, client_ip, upstream_path, model, "deny", reason, 403);
+                audit_event(pr, client_ip, upstream_path, model, "deny", reason, 403, request_id);
                 return error_json(res, 403, "invalid_request_error", "forbidden: " + reason);
             }
 
@@ -324,7 +410,9 @@ int GatewayServer::run() {
                 std::string serr;
                 backend = supervisor_->ensure_ready(e, serr);
                 if (backend.empty()) { inc("errors_total{type=\"backend_start_failed\"}");
-                    audit_event(pr, client_ip, upstream_path, model, "error", "backend start failed", 502);
+                    audit_event(pr, client_ip, upstream_path, model, "error", "backend start failed", 502,
+                                request_id, logical, e.sha256, steady_ms() - started_ms,
+                                static_cast<long long>(req.body.size()), 0);
                     return error_json(res, 502, "api_error", "не удалось поднять бэкенд: " + serr); }
                 supervisor_->acquire(logical);
                 BackendSupervisor* sup = supervisor_.get();
@@ -337,7 +425,7 @@ int GatewayServer::run() {
             if (body.contains("stream")) {
                 if (!body.at("stream").is_boolean()) {
                     inc("errors_total{type=\"bad_request\"}");
-                    audit_event(pr, client_ip, upstream_path, model, "deny", "stream must be boolean", 400);
+                    audit_event(pr, client_ip, upstream_path, model, "deny", "stream must be boolean", 400, request_id);
                     return error_json(res, 400, "invalid_request_error", "field 'stream' must be boolean", "invalid_type");
                 }
                 stream = allow_stream && body.at("stream").get<bool>();
@@ -357,14 +445,22 @@ int GatewayServer::run() {
                 cli.set_write_timeout(t_sec, t_usec);
                 auto up = cli.Post(upstream_path, fwd, out_body, "application/json");
                 if (!up) { inc("errors_total{type=\"backend_unreachable\"}");
-                    audit_event(pr, client_ip, upstream_path, model, "error", "backend unreachable", 502);
+                    audit_event(pr, client_ip, upstream_path, model, "error", "backend unreachable", 502,
+                                request_id, logical, e.sha256, steady_ms() - started_ms,
+                                static_cast<long long>(out_body.size()), 0);
                     return error_json(res, 502, "api_error", "бэкенд недоступен: " + backend); }
                 res.status = up->status;
                 res.set_content(up->body, up->has_header("Content-Type")
                                               ? up->get_header_value("Content-Type")
                                               : "application/json");
+                long long prompt_tokens = -1, completion_tokens = -1, total_tokens = -1;
+                extract_usage(up->body, prompt_tokens, completion_tokens, total_tokens);
                 audit_event(pr, client_ip, upstream_path, model,
-                            up->status < 400 ? "allow" : "error", "", up->status);
+                            up->status < 400 ? "allow" : "error", "", up->status,
+                            request_id, logical, e.sha256, steady_ms() - started_ms,
+                            static_cast<long long>(out_body.size()),
+                            static_cast<long long>(up->body.size()),
+                            prompt_tokens, completion_tokens, total_tokens);
                 return;
             }
 
@@ -389,6 +485,7 @@ int GatewayServer::run() {
                 rq.content_receiver = [pump](const char* d, size_t n, size_t, size_t) {
                     std::lock_guard<std::mutex> lk(pump->m);
                     pump->buf.append(d, n);
+                    pump->bytes_total += n;
                     pump->cv.notify_all();
                     return !pump->consumer_gone;
                 };
@@ -421,7 +518,10 @@ int GatewayServer::run() {
                 }
                 inc("errors_total{type=\"backend_error\"}");
                 audit_event(pr, client_ip, upstream_path, model, "error",
-                            "backend status " + std::to_string(st), st);
+                            "backend status " + std::to_string(st), st,
+                            request_id, logical, e.sha256, steady_ms() - started_ms,
+                            static_cast<long long>(out_body.size()),
+                            static_cast<long long>(ebody.size()));
                 res.status = st;
                 if (!ebody.empty()) res.set_content(ebody, "application/json");
                 else error_json(res, st, "api_error", "бэкенд вернул ошибку");
@@ -457,9 +557,12 @@ int GatewayServer::run() {
                     sink.done();
                     return false;
                 },
-                [this, pump, pr, client_ip, upstream_path, model](bool) {
+                [this, pump, pr, client_ip, upstream_path, model, request_id, logical, model_sha256 = e.sha256, started_ms, out_body](bool) {
                     audit_event(pr, client_ip, upstream_path, model, "allow",
-                                pump->ok ? "" : "stream interrupted", 200);
+                                pump->ok ? "" : "stream interrupted", 200,
+                                request_id, logical, model_sha256, steady_ms() - started_ms,
+                                static_cast<long long>(out_body.size()),
+                                static_cast<long long>(pump->bytes_total));
                 });
         };
     };

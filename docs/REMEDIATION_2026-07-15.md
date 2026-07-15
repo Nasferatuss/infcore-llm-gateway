@@ -15,15 +15,14 @@
 ## Частично закрыто / ограничено текущим scope
 
 - AUD-P1-01 config schema: неподдержанные `mtls`/`oidc` удалены из schema; `observability.metrics_*` получил runtime-семантику; добавлены fail-fast проверки weak keys, duplicate keys/roles/models, unknown model references, `audit.require=true` + `sink=none`.
-- AUD-P1-03 DoS: уже существующие read/write/body/request limits сохранены; full bounded queue/rate limit остаются отдельной задачей.
-- AUD-P1-04 audit payload: документация приведена к фактическому payload. Расширение request_id/latency/tokens/model hash остаётся P1.
+- AUD-P1-03 DoS: read/write/body/request limits сохранены; добавлены `max_loaded_models`, `max_parallel_starts` и per-subject `rate_limit_per_minute`. Full custom bounded httplib queue остаётся отдельной задачей.
+- AUD-P1-04 audit payload: добавлены `request_id`, `backend_id`, `latency_ms`, bytes и token usage при наличии `usage` в ответе backend.
 - AUD-P1-05 OpenAI compatibility: поддержанный subset расширен rerank; `/v1/responses` и token count явно не реализованы.
 - AUD-P1-06 deployment hardening: compose/systemd усилены (`read_only`, `cap_drop`, `no-new-privileges`, pids/mem limits, systemd hardening).
 
 ## Остаётся к отдельной реализации
 
-- Port reservation через bound socket/OS-assigned port, global capacity limits, GPU/RAM admission control.
-- Bounded request queue и per-key/model rate limits.
-- Расширенный audit payload: request_id, latency, backend_id, hashes, token/byte counts, trusted proxy policy.
-- Model integrity manifest: sha256/size/license/source/arch validation перед стартом backend.
-- Автоматическая генерация SBOM/license bundle/signatures/checksums для release artifacts.
+- Port reservation через bound socket/OS-assigned port и GPU/RAM admission control.
+- Full custom bounded request queue внутри HTTP server.
+- Trusted proxy/X-Forwarded-For policy.
+- Автоматическая генерация полного dependency SBOM для system/CUDA/Vulkan/base image.

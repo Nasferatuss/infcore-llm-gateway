@@ -24,6 +24,7 @@ public:
         int port_range_start  = 8100;          // откуда раздаются локальные порты
         int idle_timeout_ms   = 300000;        // простой до выгрузки
         int startup_timeout_ms = 120000;       // ожидание /health при старте
+        std::string backend_token_path = "/dev/urandom";
     };
 
     explicit BackendSupervisor(Options opt);

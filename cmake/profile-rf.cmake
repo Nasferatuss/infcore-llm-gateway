@@ -53,3 +53,7 @@ set(LLAMA_USE_PREBUILT_UI OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP       OFF CACHE BOOL "" FORCE)
 
 set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+
+# Release/runtime artifact должен быть самодостаточным: не полагаемся на то, что
+# libllama.so/libggml*.so попадут рядом с бинарями в Docker/systemd install.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)

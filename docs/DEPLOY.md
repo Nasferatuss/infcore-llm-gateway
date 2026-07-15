@@ -22,6 +22,9 @@ cmake -S infcore -B build -C infcore/cmake/profile-rf.cmake
 cmake --build build -j"$(nproc)"
 # артефакты: build/bin/{infcore_gateway,llama-server,infcore-cli}
 ```
+Профиль собирает static artifact (`BUILD_SHARED_LIBS=OFF`), чтобы Docker/systemd
+runtime не зависел от забытых `libllama.so`/`libggml*.so` рядом с бинарями. Проверка
+`ldd` без `not found` выполняется в Dockerfile и GitHub Actions.
 
 Требования стадии сборки: CMake >= 3.21, C++17-компилятор, CUDA toolkit и/или
 Vulkan SDK из внутреннего зеркала пакетов. GPU на стадии сборки не нужен.
@@ -45,7 +48,8 @@ Base-образ рантайма ОБЯЗАН содержать эти библ
 сервер и инструменты (профиль `profile-rf.cmake` это делает, «голая» команда — нет):
 ```sh
 cmake -S infcore -B build -DGGML_CUDA=OFF -DGGML_VULKAN=OFF \
-      -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_TOOLS=ON -DCMAKE_BUILD_TYPE=Release
+      -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_TOOLS=ON \
+      -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ```
 Без `-DLLAMA_BUILD_SERVER=ON` соберётся только `infcore_gateway`, а `llama-server`
@@ -81,7 +85,9 @@ cmake --build build -j"$(nproc)"
   под управляемые модели), таймауты простоя/старта.
 - `models` - каталог моделей (logical_name, gguf_path, modality, n_ctx, n_gpu_layers,
   `mmproj_path`). Для управляемых моделей модальности `vision` поле
-  `mmproj_path` (проектор mtmd) ОБЯЗАТЕЛЬНО - иначе fail-fast при старте.
+  `mmproj_path` (проектор mtmd) ОБЯЗАТЕЛЬНО - иначе fail-fast при старте. Для
+  `rerank` gateway стартует backend с `llama-server --reranking` и проксирует
+  `/v1/rerank`, `/v1/reranking`, `/rerank`, `/reranking`.
 
 В Docker шлюз должен слушать `0.0.0.0` (наружу публикуется только `127.0.0.1:8080`).
 Не редактируйте смонтированный read-only конфиг — задайте переменные окружения
@@ -108,8 +114,9 @@ cmake --build build -j"$(nproc)"
 
 Для systemd переменные задаются в `/etc/infcore/gateway.env`, для compose - в
 `gateway.env` (см. `deploy/compose/gateway.env.example`). Отсутствие заданной
-переменной/файла - фатальная ошибка при старте (fail-fast). Ключи-заглушки вида
-`change-me*` также отвергаются на старте.
+переменной/файла - фатальная ошибка при старте (fail-fast). Слабые ключи и
+распространённые заглушки (`change-me`, `REPLACE_ME`, `secret`, короткие строки
+менее 24 символов) также отвергаются на старте.
 
 ## 4. Модели
 
@@ -129,7 +136,8 @@ read-only). Путь в `gguf_path` должен совпадать с точк�
 
 `/health` и `/metrics` доступны без авторизации (для оркестратора и сбора метрик).
 `/metrics` - формат Prometheus на том же порту 8080, забирается VictoriaMetrics со
-стороны DevOps. Отдельного порта метрик нет.
+стороны DevOps. Путь и включение управляются `observability.metrics_path` и
+`observability.metrics_enabled`. Отдельного порта метрик нет.
 
 Управляемые `llama-server` слушают только `127.0.0.1` и требуют per-boot `--api-key`
 (генерируется шлюзом при старте). Достучаться до них в обход RBAC/audit нельзя, даже
@@ -222,5 +230,7 @@ curl -s $INFCORE_URL/health                          # {"status":"ok",...}
   `backend_url`, не указывающие в loopback/RFC1918;
 - при жёстких требованиях - nftables/firewall egress-deny на хосте.
 
-Механизм проверяется тестом `infcore/tests/egress` (netns) и на приёмке. Любой выход
-в интернет - нарушение требований.
+Механизм проверяется тестом `infcore/tests/egress` (netns). В CI он запускает
+реальный `infcore_gateway` с управляемым fake backend, делает первый запрос через
+lazy supervisor, проверяет отсутствие `INFCORE_KEY_*` в окружении backend-процесса и
+подтверждает отсутствие маршрута наружу. Любой выход в интернет - нарушение требований.

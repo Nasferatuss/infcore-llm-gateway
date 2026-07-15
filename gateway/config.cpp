@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -19,6 +20,7 @@ namespace infcore {
 static Modality parse_modality(const std::string& s) {
     if (s == "embedding") return Modality::Embedding;
     if (s == "vision")    return Modality::Vision;
+    if (s == "rerank")    return Modality::Rerank;
     return Modality::Text;
 }
 
@@ -42,6 +44,19 @@ static std::string resolve_secret(const std::string& v) {
         return s;
     }
     return v;
+}
+
+static bool weak_secret(const std::string& key) {
+    if (key.size() < 24) return true;
+    std::string lower = key;
+    for (auto& c : lower) c = (char)std::tolower((unsigned char)c);
+    static const char* bad[] = {
+        "change-me", "changeme", "replace_me", "replace-me", "example",
+        "dummy", "secret", "password", "test-key", "generate-with"
+    };
+    for (const char* b : bad)
+        if (lower.find(b) != std::string::npos) return true;
+    return false;
 }
 
 // Строгий разбор dotted-quad IPv4: ровно 4 числовых октета 0..255, без лишних
@@ -151,8 +166,8 @@ GatewayConfig load_config(const std::string& path) {
         if (s.contains("api_keys"))
             for (const auto& k : s.at("api_keys")) {
                 std::string key = resolve_secret(k.get<std::string>());
-                if (key.rfind("change-me", 0) == 0)
-                    throw std::runtime_error("infcore: заглушечный ключ 'change-me...' в security.api_keys - задайте реальный ключ (env:/file:)");
+                if (weak_secret(key))
+                    throw std::runtime_error("infcore: слабый или заглушечный ключ в security.api_keys - задайте случайный ключ длиной не менее 24 символов (env:/file:)");
                 cfg.api_keys.push_back(std::move(key));
             }
         if (s.contains("principals")) {
@@ -163,9 +178,9 @@ GatewayConfig load_config(const std::string& path) {
                 ap.principal.role    = p.value("role", std::string());
                 if (ap.api_key.empty())
                     throw std::runtime_error("infcore: principal без api_key");
-                if (ap.api_key.rfind("change-me", 0) == 0)
-                    throw std::runtime_error("infcore: заглушечный ключ 'change-me...' у principal '" +
-                        ap.principal.subject + "' - задайте реальный ключ (env:/file:)");
+                if (weak_secret(ap.api_key))
+                    throw std::runtime_error("infcore: слабый или заглушечный ключ у principal '" +
+                        ap.principal.subject + "' - задайте случайный ключ длиной не менее 24 символов (env:/file:)");
                 cfg.principals.push_back(std::move(ap));
             }
         }
@@ -191,6 +206,14 @@ GatewayConfig load_config(const std::string& path) {
     }
     if (j.contains("offline"))
         cfg.enforce_no_egress = j.at("offline").value("enforce_no_egress", true);
+
+    if (j.contains("observability")) {
+        const auto& o = j.at("observability");
+        cfg.metrics_enabled = o.value("metrics_enabled", cfg.metrics_enabled);
+        cfg.metrics_path = o.value("metrics_path", cfg.metrics_path);
+        if (cfg.metrics_path.empty() || cfg.metrics_path.front() != '/')
+            throw std::runtime_error("infcore: observability.metrics_path должен начинаться с '/'");
+    }
 
     if (j.contains("runtime")) {
         const auto& r = j.at("runtime");
@@ -223,6 +246,33 @@ GatewayConfig load_config(const std::string& path) {
         throw std::runtime_error("infcore: нет ни security.api_keys, ни security.principals — нужен хотя бы один ключ");
     if (cfg.models.empty())
         throw std::runtime_error("infcore: models пуст");
+    if (cfg.audit_require && cfg.audit_sink == "none")
+        throw std::runtime_error("infcore: security.audit.require=true несовместим с sink=none");
+
+    std::set<std::string> model_names;
+    for (const auto& m : cfg.models) {
+        if (!model_names.insert(m.logical_name).second)
+            throw std::runtime_error("infcore: duplicate model logical_name: " + m.logical_name);
+    }
+    std::set<std::string> role_names;
+    for (const auto& r : cfg.roles) {
+        if (!role_names.insert(r.name).second)
+            throw std::runtime_error("infcore: duplicate role name: " + r.name);
+        for (const auto& model : r.allow_models) {
+            if (model != "*" && !model_names.count(model))
+                throw std::runtime_error("infcore: role '" + r.name +
+                    "' references unknown model '" + model + "'");
+        }
+    }
+    std::set<std::string> api_keys_seen;
+    for (const auto& k : cfg.api_keys) {
+        if (!api_keys_seen.insert(k).second)
+            throw std::runtime_error("infcore: duplicate API key in security.api_keys");
+    }
+    for (const auto& ap : cfg.principals) {
+        if (!api_keys_seen.insert(ap.api_key).second)
+            throw std::runtime_error("infcore: duplicate API key for principal '" + ap.principal.subject + "'");
+    }
 
     // При включённом RBAC роль каждого principal должна быть объявлена в security.roles.
     if (cfg.rbac_enabled) {
@@ -248,6 +298,7 @@ GatewayConfig load_config(const std::string& path) {
 
     for (const auto& m : cfg.models) {
         const bool vlm = (m.modality == Modality::Vision);
+        const bool rerank = (m.modality == Modality::Rerank);
         if (!m.backend_url.empty()) {
             // Внешний бэкенд: при жёстком offline обязан быть локальным (не в интернет).
             if (cfg.enforce_no_egress && !is_local_host(m.backend_url))
@@ -266,6 +317,9 @@ GatewayConfig load_config(const std::string& path) {
         if (vlm && m.mmproj_path.empty())
             throw std::runtime_error("infcore: модель '" + m.logical_name +
                 "' модальности vision требует mmproj_path");
+        if (rerank && m.n_ctx < 512)
+            throw std::runtime_error("infcore: модель '" + m.logical_name +
+                "' модальности rerank требует n_ctx >= 512");
     }
 
     return cfg;

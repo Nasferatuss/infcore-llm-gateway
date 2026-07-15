@@ -3,6 +3,8 @@
 // Адрес/ключ: флаги --url/--key либо env INFCORE_URL/INFCORE_KEY.
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -21,12 +23,14 @@ struct Opts {
 void usage() {
     std::printf(
         "infcore-cli [--url URL] [--key KEY] <команда>\n"
+        "  health                 состояние gateway (/health, без авторизации)\n"
         "  models                 доступные модели (/v1/models)\n"
         "  admin-models           полный список со статусом (/admin/models)\n"
         "  enable  <model>        включить модель\n"
         "  disable <model>        выключить модель\n"
         "  chat -m <model> [текст] чат (текст из аргумента или stdin)\n"
-        "\nenv: INFCORE_URL, INFCORE_KEY (флаги имеют приоритет)\n");
+        "\nключ: --key KEY, --key-file PATH, --key-stdin или env INFCORE_KEY\n"
+        "env: INFCORE_URL, INFCORE_KEY (флаги имеют приоритет)\n");
 }
 
 httplib::Headers auth(const Opts& o) {
@@ -55,6 +59,18 @@ json request(const Opts& o, const char* method, const std::string& path, const s
     return j;
 }
 
+std::string trim_secret(std::string s) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+    return s;
+}
+
+std::string read_file(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) { std::fprintf(stderr, "infcore-cli: не удалось прочитать key-file: %s\n", path.c_str()); std::exit(2); }
+    std::stringstream ss; ss << f.rdbuf();
+    return trim_secret(ss.str());
+}
+
 int cmd_models(const Opts& o, bool admin) {
     json j = request(o, "GET", admin ? "/admin/models" : "/v1/models", "");
     if (!j.contains("data")) { std::printf("(пусто)\n"); return 0; }
@@ -69,6 +85,12 @@ int cmd_models(const Opts& o, bool admin) {
             std::printf("%-24s %s\n", id.c_str(), modality.c_str());
         }
     }
+    return 0;
+}
+
+int cmd_health(const Opts& o) {
+    json j = request(o, "GET", "/health", "");
+    std::printf("%s\n", j.dump().c_str());
     return 0;
 }
 
@@ -112,11 +134,14 @@ int main(int argc, char** argv) {
         std::string a = argv[i];
         if (a == "--url" && i + 1 < argc)      o.url = argv[++i];
         else if (a == "--key" && i + 1 < argc) o.key = argv[++i];
+        else if (a == "--key-file" && i + 1 < argc) o.key = read_file(argv[++i]);
+        else if (a == "--key-stdin") o.key = trim_secret(read_stdin());
         else args.push_back(a);
     }
     if (args.empty()) { usage(); return 1; }
 
     const std::string& cmd = args[0];
+    if (cmd == "health")        return cmd_health(o);
     if (cmd == "models")        return cmd_models(o, false);
     if (cmd == "admin-models")  return cmd_models(o, true);
     if (cmd == "enable"  && args.size() >= 2) return cmd_toggle(o, args[1], true);

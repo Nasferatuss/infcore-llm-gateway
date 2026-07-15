@@ -29,7 +29,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "authn": { "enum": ["api_key", "mtls", "oidc"], "default": "api_key" },
+        "authn": { "enum": ["api_key"], "default": "api_key" },
         "api_keys": { "type": "array", "items": { "type": "string" }, "description": "legacy: плоский список ключей (роль admin)" },
         "rbac_enabled": { "type": "boolean", "default": true },
         "principals": {
@@ -110,7 +110,7 @@
         "arch": { "type": "string", "description": "general.architecture из метаданных GGUF" },
         "backend_url": { "type": "string", "description": "Внешний llama-server; если пусто - бэкенд управляется runtime-supervisor" },
         "upstream_model": { "type": "string", "description": "Имя модели на бэкенде, если отличается от logical_name" },
-        "modality": { "enum": ["text", "embedding", "vision"], "default": "text" },
+        "modality": { "enum": ["text", "embedding", "vision", "rerank"], "default": "text" },
         "enabled": { "type": "boolean", "default": true },
         "n_ctx": { "type": "integer", "minimum": 512, "default": 8192 },
         "n_gpu_layers": { "type": "integer", "minimum": 0, "default": 0 },

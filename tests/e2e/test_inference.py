@@ -9,6 +9,7 @@
   INFCORE_KEY          API-ключ (Bearer)                                  [обязательно]
   INFCORE_E2E_MODEL    logical_name текстовой модели для chat             [обязательно]
   INFCORE_E2E_EMBED    logical_name embedding-модели (опц.)
+  INFCORE_E2E_RERANK   logical_name rerank-модели (опц.)
   INFCORE_E2E_VISION   logical_name vision-модели + INFCORE_E2E_IMAGE (data URL/URL) (опц.)
 
 Пример:
@@ -63,6 +64,16 @@ def test_embeddings():
     c = Client(URL, api_key=KEY)
     vecs = c.embeddings(embed_model, ["первый текст", "второй текст"])
     assert len(vecs) == 2 and all(len(v) > 0 for v in vecs), "неверная форма embeddings"
+
+
+def test_rerank():
+    rerank_model = os.environ.get("INFCORE_E2E_RERANK")
+    if not rerank_model:
+        pytest.skip("INFCORE_E2E_RERANK не задан")
+    from infcore import Client
+    c = Client(URL, api_key=KEY)
+    out = c.rerank(rerank_model, "столица России", ["Москва", "Берлин"])
+    assert out.get("results"), "rerank не вернул результатов"
 
 
 def test_vision_chat():

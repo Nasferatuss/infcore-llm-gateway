@@ -5,9 +5,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <stdexcept>
 #include <vector>
 
 #include "httplib.h"
@@ -16,8 +20,8 @@ namespace infcore {
 
 namespace {
 // Per-boot секрет для --api-key дочерних llama-server (offline, из /dev/urandom).
-std::string gen_token() {
-    std::ifstream ur("/dev/urandom", std::ios::binary);
+std::string gen_token(const std::string& token_path) {
+    std::ifstream ur(token_path, std::ios::binary);
     unsigned char buf[24];
     std::string tok;
     static const char* hx = "0123456789abcdef";
@@ -26,10 +30,53 @@ std::string gen_token() {
     }
     return tok;
 }
+
+void add_env(std::vector<std::string>& env, const char* name, const char* fallback = nullptr) {
+    if (const char* v = std::getenv(name); v && *v) {
+        env.emplace_back(std::string(name) + "=" + v);
+    } else if (fallback) {
+        env.emplace_back(std::string(name) + "=" + fallback);
+    }
+}
+
+std::vector<std::string> backend_environment() {
+    std::vector<std::string> env;
+    add_env(env, "PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    add_env(env, "LANG", "C.UTF-8");
+    add_env(env, "LC_ALL");
+    add_env(env, "LD_LIBRARY_PATH");
+    add_env(env, "CUDA_VISIBLE_DEVICES");
+    add_env(env, "NVIDIA_VISIBLE_DEVICES");
+    add_env(env, "NVIDIA_DRIVER_CAPABILITIES");
+    add_env(env, "VK_ICD_FILENAMES");
+    add_env(env, "XDG_CACHE_HOME");
+    add_env(env, "TMPDIR", "/tmp");
+    return env;
+}
+
+std::string resolve_executable(const std::string& bin) {
+    if (bin.find('/') != std::string::npos) return bin;
+    const char* path = "/opt/infcore/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    std::string p = path;
+    size_t start = 0;
+    while (start <= p.size()) {
+        size_t end = p.find(':', start);
+        std::string dir = p.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!dir.empty()) {
+            std::string candidate = dir + "/" + bin;
+            if (access(candidate.c_str(), X_OK) == 0) return candidate;
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return std::string();
+}
 }  // namespace
 
 BackendSupervisor::BackendSupervisor(Options opt)
-    : opt_(std::move(opt)), api_key_(gen_token()), next_port_(opt_.port_range_start) {
+    : opt_(std::move(opt)), api_key_(gen_token(opt_.backend_token_path)), next_port_(opt_.port_range_start) {
+    if (api_key_.empty())
+        throw std::runtime_error("infcore: не удалось сгенерировать внутренний backend API key");
     reaper_ = std::thread([this] { reaper_loop(); });
 }
 
@@ -81,9 +128,14 @@ bool BackendSupervisor::spawn(const ModelEntry& e, int port, pid_t& out_pid, std
         err = "не задан runtime.llama_server_bin";
         return false;
     }
+    const std::string exec_path = resolve_executable(opt_.llama_server_bin);
+    if (exec_path.empty()) {
+        err = "runtime.llama_server_bin не найден или не исполняем: " + opt_.llama_server_bin;
+        return false;
+    }
 
     std::vector<std::string> args = {
-        opt_.llama_server_bin,
+        exec_path,
         "--host", "127.0.0.1",
         "--port", std::to_string(port),
         "--model", e.gguf_path,
@@ -92,12 +144,18 @@ bool BackendSupervisor::spawn(const ModelEntry& e, int port, pid_t& out_pid, std
     };
     if (!api_key_.empty()) { args.push_back("--api-key"); args.push_back(api_key_); }
     if (e.modality == Modality::Embedding) args.push_back("--embedding");
+    if (e.modality == Modality::Rerank) args.push_back("--reranking");
     if (!e.mmproj_path.empty()) { args.push_back("--mmproj"); args.push_back(e.mmproj_path); }
 
     std::vector<char*> argv;
     argv.reserve(args.size() + 1);
     for (auto& a : args) argv.push_back(a.data());
     argv.push_back(nullptr);
+    std::vector<std::string> env_strings = backend_environment();
+    std::vector<char*> envp;
+    envp.reserve(env_strings.size() + 1);
+    for (auto& evar : env_strings) envp.push_back(evar.data());
+    envp.push_back(nullptr);
 
     pid_t pid = fork();
     if (pid < 0) { err = "fork() не удался"; return false; }
@@ -109,8 +167,8 @@ bool BackendSupervisor::spawn(const ModelEntry& e, int port, pid_t& out_pid, std
         long maxfd = sysconf(_SC_OPEN_MAX);
         if (maxfd < 3 || maxfd > 4096) maxfd = 4096;
         for (int fd = 3; fd < (int)maxfd; ++fd) ::close(fd);
-        execvp(argv[0], argv.data());
-        std::perror("infcore: execvp llama-server");
+        execve(argv[0], argv.data(), envp.data());
+        std::fprintf(stderr, "infcore: execve llama-server failed: %s\n", std::strerror(errno));
         _exit(127);
     }
 

@@ -55,6 +55,8 @@ class Client:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        # Offline/internal client: ignore HTTP(S)_PROXY from the ambient shell.
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     # --- внутреннее ----------------------------------------------------------
     def _request(self, path: str, body: dict, stream: bool):
@@ -64,7 +66,7 @@ class Client:
             headers["Authorization"] = f"Bearer {self.api_key}"
         req = urllib.request.Request(self.base_url + path, data=data, headers=headers, method="POST")
         try:
-            resp = urllib.request.urlopen(req, timeout=self.timeout)  # noqa: S310 (внутренний контур)
+            resp = self._opener.open(req, timeout=self.timeout)  # noqa: S310 (внутренний контур)
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
             msg = detail
@@ -84,9 +86,12 @@ class Client:
             headers["Authorization"] = f"Bearer {self.api_key}"
         req = urllib.request.Request(self.base_url + "/v1/models", headers=headers, method="GET")
         try:
-            resp = urllib.request.urlopen(req, timeout=self.timeout)  # noqa: S310
+            resp = self._opener.open(req, timeout=self.timeout)  # noqa: S310
         except urllib.error.HTTPError as e:
-            raise InfcoreError(f"gateway {e.code}", status=e.code) from None
+            detail = e.read().decode("utf-8", "replace")
+            raise InfcoreError(f"gateway {e.code}: {detail}", status=e.code) from None
+        except urllib.error.URLError as e:  # pragma: no cover - сеть недоступна
+            raise InfcoreError(f"gateway недоступен: {e.reason}") from None
         return json.loads(resp.read().decode("utf-8")).get("data", [])
 
     def chat(self, model: str, messages: list[dict], params: GenerationParams | None = None) -> str:
@@ -116,6 +121,9 @@ class Client:
                 chunk = json.loads(payload)
             except json.JSONDecodeError:  # pragma: no cover
                 continue
+            if "error" in chunk:
+                err = chunk.get("error") or {}
+                raise InfcoreError(err.get("message", "stream error"))
             delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
             if delta:
                 yield delta
@@ -126,3 +134,11 @@ class Client:
         resp = self._request("/v1/embeddings", body, stream=False)
         j = json.loads(resp.read().decode("utf-8"))
         return [item["embedding"] for item in j["data"]]
+
+    def rerank(self, model: str, query: str, documents: list[str], top_n: int | None = None) -> dict:
+        """POST /v1/rerank — возвращает ответ gateway/upstream reranker."""
+        body: dict = {"model": model, "query": query, "documents": documents}
+        if top_n is not None:
+            body["top_n"] = top_n
+        resp = self._request("/v1/rerank", body, stream=False)
+        return json.loads(resp.read().decode("utf-8"))

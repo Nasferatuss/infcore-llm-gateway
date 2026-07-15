@@ -47,6 +47,9 @@ struct GatewayConfig {
     std::string audit_sink = "file";                    // "file" | "none"
     std::string audit_path = "/var/log/infcore/audit.log";
     bool        audit_require = true;                    // sink=file и журнал не открылся -> fail-fast
+
+    bool        metrics_enabled = true;
+    std::string metrics_path = "/metrics";
 };
 
 // Загружает конфиг из файла. Бросает std::runtime_error при ошибке/невалидности.

@@ -17,13 +17,14 @@ infcore **построен на базе open-source llama.cpp (ggml authors, MI
 | Компонент | Лицензия | Где |
 |---|---|---|
 | ggml / llama.cpp (движок) | MIT (The ggml authors) | `LICENSE` (корень форка) |
-| nlohmann/json | MIT | `licenses/LICENSE-jsonhpp` |
-| cpp-httplib / stb / miniaudio / sheredom | MIT / Public Domain / Unlicense | `vendor/*` |
+| nlohmann/json | MIT | `infcore/THIRD_PARTY_LICENSES/nlohmann-json.txt` |
+| cpp-httplib / stb / miniaudio / sheredom | MIT / Public Domain / Unlicense | `infcore/THIRD_PARTY_LICENSES/*` |
 | infcore (свой слой) | Проприетарная | `infcore/LICENSE`, `infcore/NOTICE` |
 
-Артефакты (в `infcore/`): `NOTICE`, `THIRD_PARTY_LICENSES/` (полные тексты лицензий
-на каждый компонент), `sbom.cdx.json` (CycloneDX 1.5, компоненты с версиями,
-UPSTREAM_COMMIT в purl), `LICENSE`. Пин версии апстрима — `UPSTREAM_COMMIT` (корень форка).
+Артефакты (в `infcore/`): `LICENSE`, `NOTICE`, `THIRD_PARTY_LICENSES/` (полные тексты
+лицензий на каждый компонент), `sbom.cdx.json` (CycloneDX 1.5, компоненты с версиями,
+UPSTREAM_COMMIT в purl). Docker runtime image также включает корневой `LICENSE` как
+`/opt/infcore/LICENSE.llama.cpp`. Пин версии апстрима — `UPSTREAM_COMMIT` (корень форка).
 
 ## Модель неприкосновенности движка
 Файлы вне `infcore/` (движок) руками не редактируются. Обновление — только слиянием

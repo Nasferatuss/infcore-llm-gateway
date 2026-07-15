@@ -11,7 +11,7 @@
 
 namespace infcore {
 
-enum class Modality { Text, Embedding, Vision };
+enum class Modality { Text, Embedding, Vision, Rerank };
 
 struct ModelEntry {
     std::string logical_name;   // напр. "qwen3-moe-a3b"

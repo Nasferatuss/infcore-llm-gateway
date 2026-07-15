@@ -19,12 +19,15 @@
     // здесь ссылки на переменные окружения (из EnvironmentFile / gateway.env).
     "principals": [
       { "api_key": "env:INFCORE_KEY_ADMIN", "subject": "alice",   "role": "admin" },
-      { "api_key": "env:INFCORE_KEY_EMBED", "subject": "svc-embed", "role": "embeddings-only" }
+      { "api_key": "env:INFCORE_KEY_EMBED", "subject": "svc-embed", "role": "embeddings-only" },
+      { "api_key": "env:INFCORE_KEY_RERANK", "subject": "svc-rerank", "role": "rerank-only" }
     ],
     "roles": [
       { "name": "admin",           "allow_models": ["*"], "allow_endpoints": ["*"] },
       { "name": "embeddings-only", "allow_models": ["bge-m3-embed"],
-        "allow_endpoints": ["/v1/embeddings", "/v1/models"] }
+        "allow_endpoints": ["/v1/embeddings", "/v1/models"] },
+      { "name": "rerank-only",     "allow_models": ["bge-reranker"],
+        "allow_endpoints": ["/v1/rerank", "/v1/reranking", "/rerank", "/reranking", "/v1/models"] }
     ],
     // require=true (по умолчанию): если журнал не открылся - шлюз не стартует
     // (не отдаём трафик без аудита). Каталог создаёт systemd (LogsDirectory) / смонтируйте в Docker.
@@ -52,6 +55,13 @@
       "logical_name": "bge-m3-embed",
       "gguf_path": "/opt/infcore/models/bge-m3-Q8_0.gguf",
       "modality": "embedding",
+      "enabled": false,
+      "n_ctx": 8192
+    },
+    {
+      "logical_name": "bge-reranker",
+      "gguf_path": "/opt/infcore/models/bge-reranker-v2-m3-Q8_0.gguf",
+      "modality": "rerank",
       "enabled": false,
       "n_ctx": 8192
     }

@@ -108,6 +108,14 @@ std::string auth_token(const httplib::Request& req) {
     return parse_bearer(it->second);
 }
 
+bool endpoint_accepts_modality(const std::string& path, Modality m) {
+    if (path == "/v1/embeddings")
+        return m == Modality::Embedding;
+    if (path == "/v1/rerank" || path == "/v1/reranking" || path == "/rerank" || path == "/reranking")
+        return m == Modality::Rerank;
+    return m == Modality::Text || m == Modality::Vision;
+}
+
 // Разделяемое состояние SSE-прокси: фоновый поток тянет ответ бэкенда, а
 // content-provider downstream отдаёт байты клиенту. Статус бэкенда становится
 // известен (headers_ready) ДО коммита стрим-ответа - так мы можем вернуть
@@ -163,7 +171,7 @@ int GatewayServer::run() {
     svr.set_pre_routing_handler(
         [this](const httplib::Request& req, httplib::Response& res) {
             if (cfg_.audit_require && audit_.failed() &&
-                req.path != "/health" && req.path != "/metrics") {
+                req.path != "/health" && (!cfg_.metrics_enabled || req.path != cfg_.metrics_path)) {
                 error_json(res, 503, "api_error",
                            "audit journal unavailable; refusing traffic (fail-closed)");
                 return httplib::Server::HandlerResponse::Handled;
@@ -181,10 +189,12 @@ int GatewayServer::run() {
         res.set_content(h.dump(), "application/json");
     });
 
-    // pull-метрики (без авторизации; контур закрытый)
-    svr.Get("/metrics", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_content(render_metrics(), "text/plain; version=0.0.4");
-    });
+    // pull-метрики (без авторизации; контур закрытый), если включены конфигом
+    if (cfg_.metrics_enabled) {
+        svr.Get(cfg_.metrics_path, [this](const httplib::Request&, httplib::Response& res) {
+            res.set_content(render_metrics(), "text/plain; version=0.0.4");
+        });
+    }
 
     // /v1/models — OpenAI-совместимый список (только модели, разрешённые роли)
     svr.Get("/v1/models", [this](const httplib::Request& req, httplib::Response& res) {
@@ -255,7 +265,7 @@ int GatewayServer::run() {
         res.set_content(json{{"id", name}, {"enabled", enable}}.dump(), "application/json");
     });
 
-    // общий прокси на бэкенд llama-server (chat/completions, completions, embeddings)
+    // общий прокси на бэкенд llama-server (chat/completions, completions, embeddings, rerank)
     auto proxy = [this](const char* upstream_path, bool allow_stream) {
         return [this, upstream_path, allow_stream](const httplib::Request& req,
                                                    httplib::Response& res) {
@@ -273,7 +283,12 @@ int GatewayServer::run() {
                 audit_event(pr, client_ip, upstream_path, "", "deny", "invalid JSON", 400);
                 return error_json(res, 400, "invalid_request_error", "невалидный JSON"); }
 
-            const std::string model = body.value("model", std::string());
+            if (!body.contains("model") || !body.at("model").is_string()) {
+                inc("errors_total{type=\"bad_request\"}");
+                audit_event(pr, client_ip, upstream_path, "", "deny", "model must be a string", 400);
+                return error_json(res, 400, "invalid_request_error", "field 'model' must be a string", "invalid_type");
+            }
+            const std::string model = body.at("model").get<std::string>();
             ModelEntry e;
             if (model.empty() || !registry_.get(model, e)) { inc("errors_total{type=\"model_not_found\"}");
                 audit_event(pr, client_ip, upstream_path, model, "deny", "model not found", 404);
@@ -281,6 +296,13 @@ int GatewayServer::run() {
             if (!e.enabled) { inc("errors_total{type=\"model_disabled\"}");
                 audit_event(pr, client_ip, upstream_path, model, "deny", "model disabled", 409);
                 return error_json(res, 409, "invalid_request_error", "model disabled: " + model, "model_disabled"); }
+            if (!endpoint_accepts_modality(upstream_path, e.modality)) {
+                inc("errors_total{type=\"wrong_modality\"}");
+                audit_event(pr, client_ip, upstream_path, model, "deny", "wrong model modality", 400);
+                return error_json(res, 400, "invalid_request_error",
+                                  "model '" + model + "' does not support endpoint " + upstream_path,
+                                  "wrong_modality");
+            }
 
             // RBAC: роль должна допускать и endpoint, и модель (default-deny).
             std::string reason;
@@ -311,7 +333,15 @@ int GatewayServer::run() {
 
             // подмена имени модели на имя бэкенда, если задано
             if (!e.upstream_model.empty()) body["model"] = e.upstream_model;
-            const bool stream = allow_stream && body.value("stream", false);
+            bool stream = false;
+            if (body.contains("stream")) {
+                if (!body.at("stream").is_boolean()) {
+                    inc("errors_total{type=\"bad_request\"}");
+                    audit_event(pr, client_ip, upstream_path, model, "deny", "stream must be boolean", 400);
+                    return error_json(res, 400, "invalid_request_error", "field 'stream' must be boolean", "invalid_type");
+                }
+                stream = allow_stream && body.at("stream").get<bool>();
+            }
             if (!allow_stream) body.erase("stream");  // embeddings: не транслируем stream бэкенду
             const std::string out_body = body.dump();
 
@@ -437,6 +467,10 @@ int GatewayServer::run() {
     svr.Post("/v1/chat/completions", proxy("/v1/chat/completions", true));
     svr.Post("/v1/completions",      proxy("/v1/completions", true));
     svr.Post("/v1/embeddings",       proxy("/v1/embeddings", false));
+    svr.Post("/v1/rerank",           proxy("/v1/rerank", false));
+    svr.Post("/v1/reranking",        proxy("/v1/reranking", false));
+    svr.Post("/rerank",              proxy("/rerank", false));
+    svr.Post("/reranking",           proxy("/reranking", false));
 
     std::printf("infcore gateway слушает http://%s:%d (моделей: %zu)\n",
                 cfg_.host.c_str(), cfg_.port, cfg_.models.size());

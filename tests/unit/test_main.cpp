@@ -6,6 +6,7 @@
 
 #include "gateway/config.hpp"
 #include "gateway/json_schema.hpp"
+#include "runtime/backend_supervisor.h"
 #include "security/authn/authn.h"
 #include "security/rbac/rbac.h"
 
@@ -111,7 +112,7 @@ static void test_config() {
     const char* valid = R"({
       "server": {"host":"127.0.0.1","port":8080},
       "security": {"rbac_enabled":true,
-        "principals":[{"api_key":"real-key","subject":"a","role":"admin"}],
+        "principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "runtime": {"llama_server_bin":"/bin/true"},
       "models": [{"logical_name":"m","gguf_path":"/tmp/m.gguf"}]
@@ -128,34 +129,34 @@ static void test_config() {
 
     // vision без mmproj
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
-      "security":{"rbac_enabled":false,"principals":[{"api_key":"real","subject":"a","role":"admin"}],
+      "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "runtime":{"llama_server_bin":"/bin/true"},
       "models":[{"logical_name":"v","gguf_path":"/tmp/v.gguf","modality":"vision"}]})"));
 
     // enforce_no_egress + внешний нелокальный backend_url
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
-      "security":{"rbac_enabled":false,"principals":[{"api_key":"real","subject":"a","role":"admin"}],
+      "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "offline":{"enforce_no_egress":true},
       "models":[{"logical_name":"e","backend_url":"http://8.8.8.8:1234"}]})"));
 
     // роль principal'а не объявлена
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
-      "security":{"rbac_enabled":true,"principals":[{"api_key":"real","subject":"a","role":"ghost"}],
+      "security":{"rbac_enabled":true,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"ghost"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "models":[{"logical_name":"m","backend_url":"http://127.0.0.1:9"}]})"));
 
     // M1: обход egress-проверки через userinfo (реальный хост evil.com) -> отказ
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
-      "security":{"rbac_enabled":false,"principals":[{"api_key":"real","subject":"a","role":"admin"}],
+      "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "offline":{"enforce_no_egress":true},
       "models":[{"logical_name":"e","backend_url":"http://127.0.0.1@evil.com/"}]})"));
 
     // M1: обход по префиксу строки (хостнейм начинается с "127."/"10.") -> отказ
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
-      "security":{"rbac_enabled":false,"principals":[{"api_key":"real","subject":"a","role":"admin"}],
+      "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "offline":{"enforce_no_egress":true},
       "models":[{"logical_name":"e","backend_url":"http://127.0.0.1.evil.com:9/"}]})"));
@@ -164,7 +165,7 @@ static void test_config() {
     {
       bool ok = true;
       try { infcore::load_config(write_tmp(R"({"server":{"host":"127.0.0.1","port":8080},
-        "security":{"rbac_enabled":false,"principals":[{"api_key":"real","subject":"a","role":"admin"}],
+        "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
           "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
         "offline":{"enforce_no_egress":true},
         "models":[{"logical_name":"e","backend_url":"http://192.168.10.5:8100"}]})")); }
@@ -172,7 +173,45 @@ static void test_config() {
       CHECK(ok);
     }
 
+    // rerank-модель валидируется как отдельная модальность
+    {
+      bool ok = true;
+      try { infcore::load_config(write_tmp(R"({"server":{"host":"127.0.0.1","port":8080},
+        "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
+          "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
+        "runtime":{"llama_server_bin":"/bin/true"},
+        "models":[{"logical_name":"r","gguf_path":"/tmp/r.gguf","modality":"rerank"}]})")); }
+      catch (...) { ok = false; }
+      CHECK(ok);
+    }
+
+    // audit.require=true не может сочетаться с sink=none
+    CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
+      "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
+        "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}],
+        "audit":{"sink":"none","require":true}},
+      "models":[{"logical_name":"m","backend_url":"http://127.0.0.1:9"}]})"));
+
+    // duplicate role / model references fail fast
+    CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
+      "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
+        "roles":[{"name":"admin","allow_models":["missing"],"allow_endpoints":["*"]}]},
+      "models":[{"logical_name":"m","backend_url":"http://127.0.0.1:9"}]})"));
+
     std::remove("infcore_test_cfg.json");
+}
+
+static void test_supervisor_token_failure() {
+    infcore::BackendSupervisor::Options opt;
+    opt.llama_server_bin = "/bin/true";
+    opt.backend_token_path = "/definitely/missing/infcore-token-source";
+    bool threw = false;
+    try {
+        infcore::BackendSupervisor sup(opt);
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    CHECK(threw);
 }
 
 int main() {
@@ -180,6 +219,7 @@ int main() {
     test_authn();
     test_json_schema();
     test_config();
+    test_supervisor_token_failure();
     std::printf("infcore unit tests: %d/%d passed\n", g_total - g_fail, g_total);
     return g_fail == 0 ? 0 : 1;
 }

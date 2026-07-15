@@ -4,7 +4,7 @@
 # OpenAI-эндпоинты. Опции для проверки супервайзера:
 #   --ready-delay SEC   : /health отдаёт 503 первые SEC секунд ("модель грузится")
 #   --ignore-sigterm    : игнорировать SIGTERM (форсит путь SIGKILL в супервайзере)
-import argparse, json, sys, time, signal
+import argparse, json, os, sys, time, signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 p = argparse.ArgumentParser()
@@ -13,6 +13,7 @@ p.add_argument("--port", type=int, required=True)
 p.add_argument("--model"); p.add_argument("--ctx-size")
 p.add_argument("--n-gpu-layers"); p.add_argument("--api-key")
 p.add_argument("--embedding", action="store_true"); p.add_argument("--mmproj")
+p.add_argument("--reranking", action="store_true")
 p.add_argument("--ready-delay", type=float, default=0.0)
 p.add_argument("--ignore-sigterm", action="store_true")
 args, _ = p.parse_known_args()
@@ -20,6 +21,13 @@ args, _ = p.parse_known_args()
 if args.ignore_sigterm:
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 ready_at = time.time() + args.ready_delay
+env_dump = os.environ.get("INFCORE_FAKE_ENV_DUMP")
+if not env_dump and args.model and args.model.endswith(".envdump"):
+    env_dump = args.model
+if env_dump:
+    with open(env_dump, "w", encoding="utf-8") as f:
+        for k, v in sorted(os.environ.items()):
+            f.write(f"{k}={v}\n")
 
 
 class H(BaseHTTPRequestHandler):
@@ -38,6 +46,13 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(n) or b"{}")
+        if self.path in ("/rerank", "/reranking", "/v1/rerank", "/v1/reranking"):
+            docs = body.get("documents") or []
+            resp = {"model": body.get("model", "?"),
+                    "results": [{"index": i, "relevance_score": 1.0 / (i + 1)} for i, _ in enumerate(docs)]}
+            out = json.dumps(resp, ensure_ascii=False).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json")
+            self.end_headers(); self.wfile.write(out); return
         if body.get("stream"):
             self.send_response(200); self.send_header("Content-Type", "text/event-stream")
             self.end_headers()

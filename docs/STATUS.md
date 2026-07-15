@@ -1,6 +1,6 @@
 # STATUS — отчёт по проекту infcore (форк llama.cpp)
 
-**Дата:** 2026-07-10 · **Статус:** активная разработка · **Ветка:** `infcore` (в origin)
+**Дата:** 2026-07-15 · **Статус:** remediation после `REPOSITORY_AUDIT_2026-07-14` · **Ветка:** `infcore`
 
 > Дубликат ключевого контекста живёт в авто-памяти ассистента
 > (`llama-cpp-internal-fork.md`). Этот файл — версионируемая копия в самом репо.
@@ -12,7 +12,7 @@
 LLM (offline, локальное развёртывание на компьютере/сервере в РФ).
 - **Модели:** любые локальные GGUF (цель — Qwen3-MoE `qwen3moe`, поддержана из
   коробки; на Qwen не завязываемся).
-- **Модальности:** текст, embeddings, vision (VLM). Audio — вне области проекта (не нужен).
+- **Модальности:** текст, embeddings, rerank, vision (VLM). Audio — вне области проекта (не нужен).
 - **Железо:** NVIDIA CUDA + Vulkan + CPU.
 - **Жёстко:** полностью offline (нулевой egress в рантайме), требования рос. ПО,
   open-source compliance без сокрытия происхождения.
@@ -21,7 +21,8 @@ LLM (offline, локальное развёртывание на компьют�
 - Движок llama.cpp **не редактируем** → обновления из апстрима забираем drop-in
   (release-теги `b####`, не master).
 - Всё своё — только в каталоге `infcore/` (апстрим его не создаёт → 0 конфликтов).
-- Граница «чужое/своё» = C-API `include/llama.h`.
+- Runtime-граница «чужое/своё» = HTTP к loopback `llama-server`; C/C++ API движка
+  остаётся внутри upstream `tools/server`.
 - Лишнее железо/бэкенды — гасим **флагами** CMake, исходники в ядре **не удаляем**.
 - Физически удаляем только короткий compliance/branding-набор.
 - Из Go-репо `llm_gateway` берём **идеи**, не код.
@@ -44,11 +45,11 @@ remotes: `origin`=Nasferatuss/llama.cpp, `upstream`=ggml-org/llama.cpp.
   без правок апстрима (форсит `LLAMA_BUILD_COMMON=ON`); профиль
   `infcore/cmake/profile-rf.cmake` (cpu+cuda+vulkan ON; metal/sycl/opencl/cann/musa/
   hexagon/openvino/webgpu/zdnn/zendnn/virtgpu/hip/rpc=OFF; server+mtmd ON;
-  UI/app/examples=OFF). Проверено на macOS (сборка `llama-server` и
-  `infcore_gateway`); CUDA/Vulkan — только на целевом железе.
+  UI/app/examples=OFF; `BUILD_SHARED_LIBS=OFF` для самодостаточного runtime artifact).
 - **Gateway** (`infcore/gateway/`, proxy-front): OpenAI-совместимый control-plane
   перед бэкендами `llama-server`. `/health`, `/v1/models`, Bearer-auth,
-  `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, маршрутизация по
+  `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/rerank`,
+  `/v1/reranking`, `/rerank`, `/reranking`, маршрутизация по
   registry, SSE, OpenAI-формат ошибок, `/metrics` (на основном порту).
 - **Ленивый супервайзер:** авто-подъём `llama-server` из registry по первому
   запросу, health-check, гашение по простою. Порт назначается под локом (без гонки),
@@ -58,7 +59,7 @@ remotes: `origin`=Nasferatuss/llama.cpp, `upstream`=ggml-org/llama.cpp.
   стартуют с per-boot случайным `--api-key`; прокси добавляет ключ на `Authorization`.
   Прямой доступ к портам бэкендов (8100+) без ключа -> 401. Закрывает прежний обход
   RBAC/audit. fd-гигиена: audit fd `O_CLOEXEC`, ребёнок закрывает унаследованные fd
-  перед exec.
+  перед exec, backend получает allowlist environment без `INFCORE_KEY_*`.
 - **RBAC + audit:** доступ роль -> модель/эндпоинт (allow_endpoints, в т.ч. для
   `/v1/models`); audit пишет и отказы (400/404/409/502), и реальный статус бэкенда.
 - **JSON-Schema валидация конфига** при старте (fail-fast).
@@ -69,14 +70,15 @@ remotes: `origin`=Nasferatuss/llama.cpp, `upstream`=ggml-org/llama.cpp.
   управляемые vision без `mmproj_path` отклоняются при загрузке конфига.
 - **enforce_no_egress / секреты:** любой внешний `backend_url` валидируется как
   loopback/RFC1918 (иначе fail-fast); API-ключи сравниваются constant-time;
-  placeholder-ключи `change-me*` отклоняются на старте; legacy `security.api_keys`
+  слабые/placeholder-ключи отклоняются на старте; legacy `security.api_keys`
   даёт deprecation-warning.
 - **CLI + админ-ручка** `/admin/models`.
 - **Deploy-пакет** (`infcore/deploy/`): docker/compose/systemd под РФ-контур,
   kernel-level egress deny (systemd `IPAddressDeny=any`), docker `internal: true`.
 - **Тесты + CI:** ctest unit-тесты (`infcore/tests/unit`: RBAC/authn/json-schema/
-  config), реальный egress-тест (`infcore/tests/egress`, netns-based, skip если
-  недоступно), `.gitlab-ci.yml` в корне репо.
+  config/supervisor token failure), product egress-тест (`infcore/tests/egress`,
+  netns-based, real gateway + fake managed backend when `INFCORE_GATEWAY_BIN` is set),
+  `.github/workflows/infcore.yml` и `.gitlab-ci.yml`.
 
 ## 5. Технические «грабли» (важно)
 - `tools/ui` физически удалять НЕЛЬЗЯ — ломает сборку сервера; только флаги UI=OFF.

@@ -24,10 +24,18 @@ WORKDIR /opt/infcore
 # В рантайм только нужные бинари (gateway, cli, llama-server); прочие tools апстрима
 # (bench/quantize/rpc-client и т.п.) в образ не тащим - меньше attack surface.
 COPY --from=build /src/build/bin/infcore_gateway /src/build/bin/infcore-cli /src/build/bin/llama-server /opt/infcore/bin/
+RUN set -eu; \
+    if command -v ldd >/dev/null 2>&1; then \
+      for f in /opt/infcore/bin/infcore_gateway /opt/infcore/bin/infcore-cli /opt/infcore/bin/llama-server; do \
+        ldd "$f" | grep -q "not found" && { echo "missing runtime library for $f"; exit 1; } || true; \
+      done; \
+    fi
 # Конфиг-ШАБЛОН (env: ключи, без секретов). В бою монтируйте свой (host=0.0.0.0).
 COPY infcore/config/gateway.yaml /opt/infcore/config/gateway.yaml
 COPY infcore/docs/DEPLOY.md /opt/infcore/docs/DEPLOY.md
-COPY infcore/NOTICE infcore/sbom.cdx.json /opt/infcore/
+COPY LICENSE /opt/infcore/LICENSE.llama.cpp
+COPY infcore/LICENSE infcore/NOTICE infcore/sbom.cdx.json /opt/infcore/
+COPY infcore/THIRD_PARTY_LICENSES /opt/infcore/THIRD_PARTY_LICENSES
 # Непривилегированный пользователь + каталог под append-only audit-журнал.
 RUN useradd -r -s /usr/sbin/nologin infcore \
  && mkdir -p /var/log/infcore \

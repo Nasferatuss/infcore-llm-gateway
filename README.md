@@ -4,16 +4,16 @@
 **на базе open-source llama.cpp (ggml authors, MIT)** — см. `NOTICE`.
 
 ## Модель сопровождения: «обернуть, не трогая ядро»
-- **Движок llama.cpp не редактируется.** Весь каталог форка остаётся структурно
-  идентичным апстриму → обновления забираются **drop-in** (см. `scripts/update-upstream.sh`).
+- **Движок llama.cpp не редактируется.** Слой продукта вынесен в `infcore/`, чтобы
+  обновления забирались максимально близко к **drop-in** (см. `scripts/update-upstream.sh`).
 - **Своё** живёт только здесь, в `infcore/` (каталога нет в апстриме → нулевой
-  конфликт при слиянии). Общение с движком — через C-API `include/llama.h` и
-  хелперы `llama-common`. Файлы `tools/server` не правим — gateway строится рядом.
+  конфликт при слиянии). Runtime gateway общается с движком по HTTP через отдельные
+  `llama-server` процессы. Файлы `tools/server` не правим — gateway строится рядом.
 - Подробности и карта «ядро/периферия/своё» — в `../AUDIT.md` (в корне форка).
 
 ## Возможности
-- OpenAI-совместимый API (chat/completions, completions, embeddings, models) + SSE.
-- Любые локальные GGUF-модели: text / embeddings / vision (VLM). Audio — вне области проекта.
+- OpenAI-совместимый API (chat/completions, completions, embeddings, rerank, models) + SSE.
+- Любые локальные GGUF-модели: text / embeddings / rerank / vision (VLM). Audio — вне области проекта.
 - Multi-model registry, ленивый супервайзер (авто-подъём/гашение llama-server),
   authn/RBAC, audit, pull-метрики на `/metrics`, клиентский SDK/CLI.
 - Изоляция бэкендов: управляемые `llama-server` слушают только 127.0.0.1 и защищены
@@ -47,8 +47,8 @@ runtime/                 lazy-supervisor дочерних llama-server
 sdk/python/              клиентский SDK (stdlib-клиент REST)
 config/                  конфиги + JSON-Schema
 deploy/                  docker / compose / systemd (РФ-образы)
-tests/unit/              ctest: RBAC / authn / json-schema / config
-tests/egress/            проверка нулевого egress (netns-based)
+tests/unit/              ctest: RBAC / authn / json-schema / config / supervisor token failure
+tests/egress/            проверка нулевого egress + product smoke в netns
 docs/                    STATUS, ARCHITECTURE, COMPLIANCE, DEPLOY
 NOTICE / sbom.cdx.json / THIRD_PARTY_LICENSES   compliance
 ```

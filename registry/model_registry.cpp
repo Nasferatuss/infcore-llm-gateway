@@ -8,6 +8,7 @@ const char* modality_to_string(Modality m) {
         case Modality::Text:      return "text";
         case Modality::Embedding: return "embedding";
         case Modality::Vision:    return "vision";
+        case Modality::Rerank:    return "rerank";
     }
     return "text";
 }

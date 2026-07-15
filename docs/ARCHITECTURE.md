@@ -1,9 +1,10 @@
 # Архитектура infcore
 
 ## Принцип
-Слой над llama.cpp без правок движка. Граница «чужое/своё» — C-API `include/llama.h`.
-Движок (ggml + libllama + tools/server) — апстрим, обновляется drop-in. Всё «своё» —
-в каталоге `infcore/` (новый каталог → не конфликтует при слиянии с апстримом).
+Слой над llama.cpp без правок движка. Runtime-граница gateway/engine — HTTP к
+отдельным процессам `llama-server`; C/C++ API движка остаётся внутри upstream
+`tools/server`. Движок (ggml + libllama + tools/server) — апстрим, обновляется
+drop-in. Всё «своё» — в каталоге `infcore/`.
 
 ## Слои
 ```
@@ -13,7 +14,7 @@
 │ infcore/gateway: OpenAI-surface + routing + policy             │  API (своё)
 │   authn/rbac (infcore/security) · audit · metrics (observ.)    │
 │   registry (multi-model) · lazy-supervisor                     │
-├───────────────── граница: include/llama.h ───────────────────-┤
+├──────────── runtime boundary: HTTP к loopback llama-server ────┤
 │ tools/server (OpenAI-совм., SSE) · libllama (src/) · ggml      │  движок (апстрим)
 │   бэкенды: cpu + cuda + vulkan; слушает только 127.0.0.1       │
 └──────────────────────────────────────────────────────────────┘
@@ -25,7 +26,7 @@
   и стартуют с per-boot случайным `--api-key`; прямой доступ к их портам (8100+) без
   ключа -> 401.
 - **Gateway (`infcore_gateway`):** наша надстройка — единая точка входа: authn/RBAC,
-  routing по multi-model registry, политики/квоты, audit, pull-метрики, healthcheck.
+  routing по multi-model registry, audit, pull-метрики, healthcheck.
   Работает как фронт (proxy-front) перед подпроцессами `llama-server`; при
   проксировании добавляет per-boot ключ бэкенда на `Authorization`.
 
@@ -37,13 +38,13 @@ active-token на RAII (аборт клиента не течёт в счётч�
 
 ## Поток запроса (chat, OpenAI)
 1. REST принимает `/v1/chat/completions` → `authn` (api_key, constant-time сравнение).
-2. `rbac` + `policy`: роль → разрешена ли модель/эндпоинт (allow_endpoints); квоты.
+2. `rbac`: роль → разрешена ли модель/эндпоинт (allow_endpoints).
 3. `routing`: `model` → `registry` → бэкенд (llama-server нужной модели, при
    необходимости поднимается супервайзером).
 4. Проксирование с SSE при `stream:true`. Статус апстрима проверяется ДО коммита
    стрима: не-2xx возвращается обычной JSON-ошибкой (OpenAI shape), а не SSE внутри
    200; синтетические ошибки завершают стрим `data: [DONE]`.
-5. `audit` (кто/модель/токены/реальный статус бэкенда, в т.ч. отказы) + `metrics`.
+5. `audit` (кто/модель/эндпоинт/status/outcome, в т.ч. отказы) + `metrics`.
 
 ## Offline-инварианты
 - Рантайм без исходящих соединений (`offline.enforce_no_egress`, `tests/egress/`).
@@ -57,6 +58,6 @@ active-token на RAII (аборт клиента не течёт в счётч�
 - Зависимости — из внутренних зеркал.
 
 ## Модели и модальности
-Поддерживаются любые локальные GGUF, как у llama.cpp: text, embeddings, vision (VLM
-через `mmproj_path` -> `--mmproj`). Audio (ASR/TTS) — вне области проекта.
+Поддерживаются любые локальные GGUF, как у llama.cpp: text, embeddings, rerank
+(`--reranking`), vision (VLM через `mmproj_path` -> `--mmproj`). Audio (ASR/TTS) — вне области проекта.
 Новые архитектуры приезжают drop-in вместе с обновлением движка.

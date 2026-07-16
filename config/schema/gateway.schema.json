@@ -12,6 +12,7 @@
       "required": ["host", "port"],
       "properties": {
         "host": { "type": "string", "default": "127.0.0.1" },
+        "trusted_proxies": { "type": "array", "items": { "type": "string" }, "description": "IPv4/CIDR доверенных reverse-proxy. Только для запросов с этих адресов client_ip в аудите берётся из X-Real-IP/X-Forwarded-For. Пусто = не доверять никому" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "max_concurrent_requests": { "type": "integer", "minimum": 1, "default": 64, "description": "Размер пула воркеров = потолок одновременных запросов (SSE держит воркер весь стрим)" },
         "request_timeout_ms": { "type": "integer", "minimum": 0, "default": 120000, "description": "Таймаут запроса к бэкенду (upstream)" },

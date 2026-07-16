@@ -150,6 +150,35 @@ static bool parse_ipv4(const std::string& h, unsigned o[4]) {
     return true;
 }
 
+// Разбор "10.0.0.0/8" или "192.168.1.5" (без маски = /32). Опирается на строгий
+// parse_ipv4, поэтому мусор вида "10.0.0.0/33" или "1.2.3.4.5/8" не проходит.
+bool parse_cidr_v4(const std::string& s, unsigned net[4], int& bits) {
+    const auto slash = s.find('/');
+    std::string ip = (slash == std::string::npos) ? s : s.substr(0, slash);
+    bits = 32;
+    if (slash != std::string::npos) {
+        const std::string b = s.substr(slash + 1);
+        if (b.empty() || b.size() > 2) return false;
+        for (char c : b) if (!std::isdigit((unsigned char)c)) return false;
+        bits = std::stoi(b);
+        if (bits < 0 || bits > 32) return false;
+    }
+    return parse_ipv4(ip, net);
+}
+
+// Адрес входит в сеть? Сравниваем как 32-битные числа под маской.
+bool cidr_contains_v4(const std::string& cidr, const std::string& addr) {
+    unsigned net[4], a[4];
+    int bits = 0;
+    if (!parse_cidr_v4(cidr, net, bits)) return false;
+    if (!parse_ipv4(addr, a)) return false;
+    const uint32_t nv = (net[0] << 24) | (net[1] << 16) | (net[2] << 8) | net[3];
+    const uint32_t av = (a[0] << 24) | (a[1] << 16) | (a[2] << 8) | a[3];
+    if (bits == 0) return true;                       // 0.0.0.0/0 - вся сеть
+    const uint32_t mask = bits == 32 ? 0xFFFFFFFFu : ~((1u << (32 - bits)) - 1);
+    return (nv & mask) == (av & mask);
+}
+
 // Хост URL локальный (loopback/RFC1918/localhost)? Для offline-инварианта:
 // внешние backend_url обязаны указывать внутрь контура, не в интернет.
 // Строго отсекаем userinfo ("http://127.0.0.1@evil.com" -> host = evil.com) и
@@ -225,6 +254,18 @@ GatewayConfig load_config(const std::string& path) {
         cfg.read_timeout_ms  = s.value("read_timeout_ms", cfg.read_timeout_ms);
         cfg.write_timeout_ms = s.value("write_timeout_ms", cfg.write_timeout_ms);
         cfg.max_body_bytes   = s.value("max_body_bytes", cfg.max_body_bytes);
+        if (s.contains("trusted_proxies")) {
+            for (const auto& p : s.at("trusted_proxies")) {
+                const std::string cidr = p.get<std::string>();
+                // Валидируем на старте, а не при каждом запросе: опечатка в CIDR
+                // означала бы, что прокси молча не доверяют и весь аудит уезжает
+                // в client_ip=127.0.0.1 - такое надо ловить fail-fast.
+                unsigned net[4]; int bits = 0;
+                if (!parse_cidr_v4(cidr, net, bits))
+                    throw std::runtime_error("infcore: server.trusted_proxies: не IPv4/CIDR: " + cidr);
+                cfg.trusted_proxies.push_back(cidr);
+            }
+        }
     }
     if (j.contains("security")) {
         const auto& s = j.at("security");

@@ -1,0 +1,105 @@
+# infcore — правила алертинга (Prometheus / vmalert).
+#
+# Пороги латентности ниже подобраны под инференс LLM и ЗАВЕДОМО требуют калибровки
+# под ваше железо и модель: то, что для 35B на 8 GiB норма, для H100 — авария.
+# Снимите базовую линию нагрузочным прогоном (infcore/tests/load/loadtest.py) и
+# правьте пороги, а не отключайте алерты.
+
+groups:
+  - name: infcore-gateway
+    rules:
+      # --- Доступность -------------------------------------------------------
+      - alert: InfcoreGatewayDown
+        expr: up{job="infcore-gateway"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "infcore gateway не отвечает на скрейп"
+          description: "Цель {{ $labels.instance }} недоступна больше минуты."
+
+      # --- Аудит -------------------------------------------------------------
+      # Самый важный алерт: при audit.require=true шлюз в этом состоянии отдаёт 503
+      # на ВЕСЬ трафик (fail-closed). Это простой сервиса, а не «что-то странное».
+      - alert: InfcoreAuditFailed
+        expr: infcore_gateway_audit_failed == 1
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: "Писатель audit-журнала упал — трафик режется fail-closed"
+          description: >-
+            Обычно это ENOSPC/EIO на разделе журнала. Шлюз не отдаёт трафик,
+            который не сможет записать. Проверьте место на диске и права.
+
+      # >0 означает: ротация де-факто не работает, журнал пишется в переименованный
+      # файл. Данные не теряются, но растут не там, где их ждёт logrotate.
+      - alert: InfcoreAuditReopenFailing
+        expr: increase(infcore_gateway_audit_reopen_failures_total[1h]) > 0
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: "Не удаётся переоткрыть audit-журнал после ротации"
+          description: >-
+            Проверьте права на каталог журнала у пользователя сервиса и
+            /etc/logrotate.d/infcore.
+
+      # Тишина в reopens при живом logrotate = ротация не доезжает до шлюза
+      # (нет ExecReload / не тот postrotate). Журнал будет расти до упора,
+      # а при упоре в лимит размера аудит уйдёт в fail-closed.
+      - alert: InfcoreAuditNotRotating
+        expr: increase(infcore_gateway_audit_reopens_total[36h]) == 0
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Audit-журнал не переоткрывался больше суток"
+          description: >-
+            Ожидается daily-ротация. Проверьте, что logrotate доходит до
+            systemctl reload infcore-gateway (ExecReload=kill -HUP).
+
+      # --- Ошибки ------------------------------------------------------------
+      - alert: InfcoreBackendErrors
+        expr: increase(infcore_gateway_errors_total{type=~"backend_error|backend_unreachable|backend_start_failed"}[10m]) > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Ошибки бэкенда llama-server: {{ $labels.type }}"
+          description: "Модель не поднимается или отваливается. Смотрите журнал юнита."
+
+      # Всплеск 401 — либо ротация ключей поехала, либо перебор ключей.
+      - alert: InfcoreAuthFailureSpike
+        expr: increase(infcore_gateway_errors_total{type="unauthorized"}[5m]) > 20
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Всплеск неудачных авторизаций"
+          description: >-
+            Либо у клиента протух ключ после ротации, либо это перебор.
+            Смотрите subject/client_ip в audit-журнале.
+
+      # --- Насыщение ---------------------------------------------------------
+      # p95 латентности. ПОРОГ КАЛИБРОВАТЬ: 30с осмысленно для крупной модели с
+      # частичным offload; на H100 с моделью целиком в VRAM он должен быть в разы ниже.
+      - alert: InfcoreLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(infcore_gateway_request_duration_seconds_bucket[10m]))
+          ) > 30
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 латентности выше порога ({{ $value | humanize }}s)"
+          description: >-
+            Обычно это очередь: запросов больше, чем слотов у llama-server.
+            Сверьтесь с базовой линией из нагрузочного прогона.
+
+      # Модели в реестре есть, но ни один бэкенд не поднят при живом трафике ->
+      # запросы упираются в холодный старт либо бэкенд не стартует вовсе.
+      - alert: InfcoreNoBackendUnderTraffic
+        expr: |
+          infcore_gateway_backends_loaded == 0
+          and on (instance) rate(infcore_gateway_requests_total[10m]) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Идёт трафик, но ни один бэкенд не поднят"
+          description: "Проверьте runtime.startup_timeout_ms и errors_total{type=~\"backend_.*\"}."

@@ -1,0 +1,41 @@
+# infcore — ротация audit-журнала. Положить в /etc/logrotate.d/infcore.
+#
+# ВАЖНО про режим ротации. Шлюз держит fd журнала открытым всю жизнь процесса
+# (O_APPEND + fsync на каждый батч), поэтому:
+#
+#   * copytruncate НЕЛЬЗЯ: между copy и truncate теряются события. Для журнала,
+#     который является предметом аудита, потеря записи недопустима.
+#   * create (rename + новый файл) БЕЗ сигнала тоже нельзя: шлюз продолжит писать
+#     в переименованный fd, а новый файл останется пустым — весь аудит молча
+#     утечёт в архив.
+#
+# Поэтому: rename + SIGHUP. По SIGHUP шлюз переоткрывает журнал по прежнему пути.
+# Переоткрытие происходит перед записью следующего события; если событий нет,
+# терять нечего — писать в переименованный файл всё равно некому.
+#
+# Проверить, что ротация реально состоялась:
+#   curl -s localhost:8080/metrics | grep audit_reopen
+#   infcore_gateway_audit_reopens_total         должен вырасти
+#   infcore_gateway_audit_reopen_failures_total должен остаться 0
+
+/var/log/infcore/audit.log {
+    daily
+    rotate 90                # срок хранения задаётся требованиями к аудиту, не диском
+    dateext                  # audit.log-20260716 вместо audit.log.1 — искать по дате проще
+    dateformat -%Y%m%d
+    missingok                # журнал появляется при первом старте шлюза
+    notifempty
+    compress
+    delaycompress            # текущий архив не жмём: он ещё может дописываться
+    create 0640 infcore infcore   # владелец = пользователь сервиса (см. systemd User=)
+
+    # НЕ copytruncate: см. выше.
+    sharedscripts
+    postrotate
+        # Переоткрыть журнал. systemctl reload -> ExecReload -> kill -HUP.
+        # Если юнит не установлен (запуск вручную/в контейнере) — шлём сигнал напрямую.
+        systemctl reload infcore-gateway.service 2>/dev/null \
+            || pkill -HUP -x infcore_gateway 2>/dev/null \
+            || true
+    endscript
+}

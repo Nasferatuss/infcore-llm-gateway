@@ -31,6 +31,16 @@ struct GatewayConfig {
     bool        enforce_no_egress = true;
     bool        require_model_integrity = false;
 
+    // Доверенные reverse-proxy (IPv4 или CIDR). ТОЛЬКО для запросов, пришедших с
+    // этих адресов, реальный клиент берётся из X-Real-IP / X-Forwarded-For;
+    // остальным заголовок не верим (иначе любой клиент подделает себе client_ip
+    // в audit-журнале). Пусто (по умолчанию) = не доверять никому: client_ip
+    // всегда равен peer'у соединения.
+    //
+    // Без этого за TLS-прокси КАЖДАЯ запись аудита получает client_ip=127.0.0.1
+    // и журнал теряет измерение «откуда».
+    std::vector<std::string> trusted_proxies;
+
     // runtime: lazy-подъём управляемых бэкендов (модели с пустым backend_url)
     std::string llama_server_bin;            // путь к нашему llama-server (из сборки)
     int         port_range_start   = 8100;
@@ -58,5 +68,10 @@ struct GatewayConfig {
 
 // Загружает конфиг из файла. Бросает std::runtime_error при ошибке/невалидности.
 GatewayConfig load_config(const std::string& path);
+
+// "10.0.0.0/8" | "192.168.1.5" (без маски = /32) -> сеть + длина префикса.
+bool parse_cidr_v4(const std::string& s, unsigned net[4], int& bits);
+// Входит ли addr в сеть cidr. false, если любая из строк не разбирается.
+bool cidr_contains_v4(const std::string& cidr, const std::string& addr);
 
 }  // namespace infcore

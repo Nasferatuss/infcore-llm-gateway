@@ -16,6 +16,11 @@
 #include "security/authn/authn.h"
 #include "security/rbac/rbac.h"
 
+// Forward-декларация вместо #include "httplib.h": заголовок шлюза не должен тащить
+// за собой HTTP-библиотеку (её включает только server.cpp, а юнит-тесты собирают
+// config.cpp/json_schema.cpp без неё).
+namespace httplib { struct Request; }
+
 namespace infcore {
 
 class GatewayServer {
@@ -59,6 +64,12 @@ private:
 
     void   inc(const std::string& key);
     long   get_counter(const std::string& key);
+
+    // Реальный IP клиента для audit-журнала. За доверенным reverse-proxy это
+    // X-Real-IP / X-Forwarded-For, иначе - peer соединения. См. cfg_.trusted_proxies:
+    // заголовкам верим ТОЛЬКО от доверенных прокси, иначе client_ip подделывается
+    // одним лишним заголовком в запросе.
+    std::string client_ip_of(const httplib::Request& req) const;
     std::string render_metrics();
     bool   allow_rate(const Principal& pr, std::string& reason);
 

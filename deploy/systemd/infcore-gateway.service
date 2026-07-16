@@ -20,6 +20,13 @@ EnvironmentFile=-/etc/infcore/gateway.env
 
 ExecStart=/opt/infcore/bin/infcore_gateway /opt/infcore/config/gateway.yaml
 
+# Ротация audit-журнала: SIGHUP -> шлюз переоткрывает журнал по прежнему пути.
+# Дёргается из /etc/logrotate.d/infcore (postrotate: systemctl reload). БЕЗ этого
+# logrotate в режиме create оставил бы шлюз писать в переименованный файл, а новый
+# остался бы пустым - весь аудит утекал бы в архив молча.
+# Конфиг при этом НЕ перечитывается: смена ключей/моделей требует restart.
+ExecReload=/bin/kill -HUP $MAINPID
+
 # Gateway сам поднимает дочерние llama-server. control-group гарантирует, что при
 # остановке/перезапуске юнита будут убиты ВСЕ процессы (включая модели), без сирот.
 KillMode=control-group

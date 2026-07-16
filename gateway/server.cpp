@@ -112,6 +112,45 @@ void GatewayServer::audit_event(const Principal& pr, const std::string& client_i
     audit_.log(ev);
 }
 
+namespace {
+// Самый правый элемент X-Forwarded-For. Именно правый, а не левый: nginx/Angie в
+// proxy_add_x_forwarded_for ДОПИСЫВАЮТ своего peer'а справа, тогда как левые
+// элементы пришли от клиента и подделываются тривиально ("X-Forwarded-For: 8.8.8.8").
+std::string rightmost_xff(const std::string& v) {
+    const auto end = v.find_last_not_of(" \t");
+    if (end == std::string::npos) return {};
+    const auto comma = v.find_last_of(',', end);
+    const auto start = (comma == std::string::npos) ? 0 : comma + 1;
+    const auto b = v.find_first_not_of(" \t", start);
+    if (b == std::string::npos || b > end) return {};
+    return v.substr(b, end - b + 1);
+}
+}  // namespace
+
+// Реальный IP клиента для аудита. Без этого за TLS-прокси КАЖДАЯ запись журнала
+// получала бы client_ip=127.0.0.1 (peer'ом всегда оказывается сам прокси).
+//
+// Доверяем заголовкам ТОЛЬКО если запрос пришёл с адреса из trusted_proxies:
+// иначе клиент подделывает себе IP в аудите одним лишним заголовком. Список пуст
+// по умолчанию -> поведение прежнее (всегда peer соединения).
+std::string GatewayServer::client_ip_of(const httplib::Request& req) const {
+    const std::string peer = req.remote_addr;   // единственное место, где берём peer напрямую
+    if (cfg_.trusted_proxies.empty()) return peer;
+
+    bool trusted = false;
+    for (const auto& cidr : cfg_.trusted_proxies)
+        if (cidr_contains_v4(cidr, peer)) { trusted = true; break; }
+    if (!trusted) return peer;
+
+    // X-Real-IP прокси ЗАДАЁТ (proxy_set_header), затирая клиентское значение,
+    // поэтому подделать его нельзя - предпочитаем его.
+    const std::string real = req.get_header_value("X-Real-IP");
+    if (!real.empty()) return real;
+
+    const std::string xff = rightmost_xff(req.get_header_value("X-Forwarded-For"));
+    return xff.empty() ? peer : xff;
+}
+
 void GatewayServer::inc(const std::string& key) {
     std::lock_guard<std::mutex> lock(metrics_mu_);
     counters_[key].fetch_add(1, std::memory_order_relaxed);
@@ -359,14 +398,14 @@ int GatewayServer::run() {
     svr.Get("/v1/models", [this](const httplib::Request& req, httplib::Response& res) {
         Principal pr;
         if (!authn_.verify(auth_token(req), pr)) { inc("errors_total{type=\"unauthorized\"}");
-            audit_event({}, req.remote_addr, "/v1/models", "", "deny", "unauthorized", 401);
+            audit_event({}, client_ip_of(req), "/v1/models", "", "deny", "unauthorized", 401);
             return error_json(res, 401, "invalid_request_error", "unauthorized"); }
         std::string reason;
         if (!allow_rate(pr, reason)) { inc("errors_total{type=\"rate_limited\"}");
-            audit_event(pr, req.remote_addr, "/v1/models", "", "deny", reason, 429);
+            audit_event(pr, client_ip_of(req), "/v1/models", "", "deny", reason, 429);
             return error_json(res, 429, "rate_limit_error", reason, "rate_limit_exceeded"); }
         if (!rbac_.allow(pr.role, "/v1/models", "", reason)) { inc("errors_total{type=\"forbidden\"}");
-            audit_event(pr, req.remote_addr, "/v1/models", "", "deny", reason, 403);
+            audit_event(pr, client_ip_of(req), "/v1/models", "", "deny", reason, 403);
             return error_json(res, 403, "invalid_request_error", "forbidden: " + reason); }
         json data = json::array();
         for (const auto& m : registry_.list()) {
@@ -376,7 +415,7 @@ int GatewayServer::run() {
                             {"created", 0}, {"owned_by", "infcore"},
                             {"modality", modality_to_string(m.modality)}});
         }
-        audit_event(pr, req.remote_addr, "/v1/models", "", "allow", "", 200);
+        audit_event(pr, client_ip_of(req), "/v1/models", "", "allow", "", 200);
         res.set_content(json{{"object", "list"}, {"data", data}}.dump(), "application/json");
     });
 
@@ -386,21 +425,21 @@ int GatewayServer::run() {
     svr.Get("/admin/models", [this](const httplib::Request& req, httplib::Response& res) {
         Principal pr;
         if (!authn_.verify(auth_token(req), pr)) { inc("errors_total{type=\"unauthorized\"}");
-            audit_event({}, req.remote_addr, "/admin/models", "", "deny", "unauthorized", 401);
+            audit_event({}, client_ip_of(req), "/admin/models", "", "deny", "unauthorized", 401);
             return error_json(res, 401, "invalid_request_error", "unauthorized"); }
         std::string reason;
         if (!allow_rate(pr, reason)) { inc("errors_total{type=\"rate_limited\"}");
-            audit_event(pr, req.remote_addr, "/admin/models", "", "deny", reason, 429);
+            audit_event(pr, client_ip_of(req), "/admin/models", "", "deny", reason, 429);
             return error_json(res, 429, "rate_limit_error", reason, "rate_limit_exceeded"); }
         if (!rbac_.allow(pr.role, "/admin/models", "", reason)) { inc("errors_total{type=\"forbidden\"}");
-            audit_event(pr, req.remote_addr, "/admin/models", "", "deny", reason, 403);
+            audit_event(pr, client_ip_of(req), "/admin/models", "", "deny", reason, 403);
             return error_json(res, 403, "invalid_request_error", "forbidden: " + reason); }
         json data = json::array();
         for (const auto& m : registry_.list())
             data.push_back({{"id", m.logical_name}, {"modality", modality_to_string(m.modality)},
                             {"enabled", m.enabled}, {"managed", m.backend_url.empty()},
                             {"backend_url", m.backend_url}, {"arch", m.arch}});
-        audit_event(pr, req.remote_addr, "/admin/models", "", "allow", "", 200);
+        audit_event(pr, client_ip_of(req), "/admin/models", "", "allow", "", 200);
         res.set_content(json{{"object", "list"}, {"data", data}}.dump(), "application/json");
     });
 
@@ -409,26 +448,26 @@ int GatewayServer::run() {
              [this](const httplib::Request& req, httplib::Response& res) {
         Principal pr;
         if (!authn_.verify(auth_token(req), pr)) { inc("errors_total{type=\"unauthorized\"}");
-            audit_event({}, req.remote_addr, "/admin/models", "", "deny", "unauthorized", 401);
+            audit_event({}, client_ip_of(req), "/admin/models", "", "deny", "unauthorized", 401);
             return error_json(res, 401, "invalid_request_error", "unauthorized"); }
         std::string reason;
         if (!allow_rate(pr, reason)) { inc("errors_total{type=\"rate_limited\"}");
-            audit_event(pr, req.remote_addr, "/admin/models", "", "deny", reason, 429);
+            audit_event(pr, client_ip_of(req), "/admin/models", "", "deny", reason, 429);
             return error_json(res, 429, "rate_limit_error", reason, "rate_limit_exceeded"); }
         if (!rbac_.allow(pr.role, "/admin/models", "", reason)) { inc("errors_total{type=\"forbidden\"}");
-            audit_event(pr, req.remote_addr, "/admin/models", "", "deny", reason, 403);
+            audit_event(pr, client_ip_of(req), "/admin/models", "", "deny", reason, 403);
             return error_json(res, 403, "invalid_request_error", "forbidden: " + reason); }
         const std::string name   = req.matches[1];
         const bool        enable = (req.matches[2] == "enable");
         if (!registry_.set_enabled(name, enable)) { inc("errors_total{type=\"model_not_found\"}");
-            audit_event(pr, req.remote_addr, "/admin/models", name, "deny", "model not found", 404);
+            audit_event(pr, client_ip_of(req), "/admin/models", name, "deny", "model not found", 404);
             return error_json(res, 404, "invalid_request_error", "model not found: " + name); }
         // disable управляемой модели -> гасим её llama-server (иначе висел бы до idle-таймаута).
         if (!enable) {
             ModelEntry me;
             if (registry_.get(name, me) && me.backend_url.empty()) supervisor_->stop(name);
         }
-        audit_event(pr, req.remote_addr, "/admin/models", name, "allow",
+        audit_event(pr, client_ip_of(req), "/admin/models", name, "allow",
                     enable ? "enabled" : "disabled", 200);
         res.set_content(json{{"id", name}, {"enabled", enable}}.dump(), "application/json");
     });
@@ -446,14 +485,14 @@ int GatewayServer::run() {
             // не допускает).
             Principal pr;
             if (!authn_.verify(auth_token(req), pr)) { inc("errors_total{type=\"unauthorized\"}");
-                audit_event({}, req.remote_addr, upstream_path, "", "deny", "unauthorized", 401, request_id);
+                audit_event({}, client_ip_of(req), upstream_path, "", "deny", "unauthorized", 401, request_id);
                 return error_json(res, 401, "invalid_request_error", "unauthorized"); }
             std::string rate_reason;
             if (!allow_rate(pr, rate_reason)) { inc("errors_total{type=\"rate_limited\"}");
-                audit_event(pr, req.remote_addr, upstream_path, "", "deny", rate_reason, 429, request_id);
+                audit_event(pr, client_ip_of(req), upstream_path, "", "deny", rate_reason, 429, request_id);
                 return error_json(res, 429, "rate_limit_error", rate_reason, "rate_limit_exceeded"); }
 
-            const std::string client_ip = req.remote_addr;
+            const std::string client_ip = client_ip_of(req);
 
             json body;
             try { body = json::parse(req.body); }

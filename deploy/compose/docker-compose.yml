@@ -33,6 +33,12 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 512
+    # ВНИМАНИЕ: подбирается ПОД МОДЕЛЬ, 16g - лишь дефолт под небольшие GGUF.
+    # Gateway сам занимает единицы МБ, но дочерний llama-server держит в RAM всё,
+    # что не уехало в VRAM. Замер: Qwen3.6-35B-A3B Q5_K_M (25.2 GiB на диске) при
+    # частичном offload на 8 GiB GPU -> RSS/PSS ~20.2 GiB, т.е. с 16g контейнер
+    # будет убит OOM-killer'ом. Ориентир: mem_limit >= размер GGUF - объём,
+    # реально уехавший в VRAM, плюс запас на KV-кэш и compute-буферы.
     mem_limit: 16g
     healthcheck:
       test: ["CMD", "/opt/infcore/bin/infcore-cli", "--url", "http://127.0.0.1:8080", "health"]

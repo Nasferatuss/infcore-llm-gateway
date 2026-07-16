@@ -54,9 +54,11 @@ def build_prompt(target_tokens):
     base = "Кратко ответь одним предложением: зачем нужен контроль целостности модели?"
     if target_tokens <= 0:
         return base
-    # ~1 токен на слово — грубо, но для нагрузки достаточно.
-    filler = " ".join(f"факт номер {i} не имеет значения." for i in range(target_tokens))
-    return f"Игнорируй следующий текст.\n{filler}\n\n{base}"
+    # Филлер — ASCII-слово с ведущим пробелом: у BPE-словарей это стабильно ~1
+    # токен на повтор. Кириллица здесь не годится: "факт номер 7 не важен."
+    # разворачивается в ~11 токенов, и запрос молча улетает за n_ctx.
+    filler = " data" * target_tokens
+    return f"Ignore this filler:{filler}\n\n{base}"
 
 
 class Stats:

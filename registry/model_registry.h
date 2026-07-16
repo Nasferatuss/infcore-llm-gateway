@@ -29,6 +29,9 @@ struct ModelEntry {
     Modality    modality = Modality::Text;
     bool        enabled  = true;
     int32_t     n_ctx        = 8192;
+    // -1 = не передавать --n-gpu-layers бэкенду: llama.cpp сам подгонит offload
+    // под свободную VRAM. Любое явное значение эту авто-подгонку ОТКЛЮЧАЕТ
+    // (llama.cpp не переопределяет заданное пользователем), см. backend_supervisor.
     int32_t     n_gpu_layers = 0;
 };
 

@@ -149,8 +149,16 @@ bool BackendSupervisor::spawn(const ModelEntry& e, int port, pid_t& out_pid, std
         "--port", std::to_string(port),
         "--model", e.gguf_path,
         "--ctx-size", std::to_string(e.n_ctx),
-        "--n-gpu-layers", std::to_string(e.n_gpu_layers),
     };
+    // n_gpu_layers < 0 -> флаг НЕ передаём: llama.cpp сам подгонит offload под
+    // свободную VRAM. Передавать его всегда нельзя - любое явное значение
+    // отключает авто-подгонку ("n_gpu_layers already set by user ... abort"),
+    // а на моделях, которые в VRAM целиком не влезают, подобранный вручную
+    // offload заметно проигрывает авто-режиму.
+    if (e.n_gpu_layers >= 0) {
+        args.push_back("--n-gpu-layers");
+        args.push_back(std::to_string(e.n_gpu_layers));
+    }
     if (!api_key_.empty()) { args.push_back("--api-key"); args.push_back(api_key_); }
     if (e.modality == Modality::Embedding) args.push_back("--embedding");
     if (e.modality == Modality::Rerank) args.push_back("--reranking");

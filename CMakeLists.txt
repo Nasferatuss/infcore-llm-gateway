@@ -24,6 +24,30 @@ if(NOT TARGET llama)
 endif()
 
 # -----------------------------------------------------------------------------
+# Встраиваем JSON-Schema в бинарь: единый источник истины - файл схемы,
+# заголовок генерируется на этапе конфигурации (config валидируется по нему при
+# старте). Правка схемы должна пере-встраивать заголовок (иначе file(READ)
+# кэшируется) - отсюда CMAKE_CONFIGURE_DEPENDS.
+#
+# Генерируем РОВНО ОДИН РАЗ здесь, а не в каждом потребителе (gateway, tests):
+# повторный set_property(CMAKE_CONFIGURE_DEPENDS) на тот же файл из двух
+# каталогов заставляет генератор Ninja выпустить два правила на один и тот же
+# выход -> "multiple rules generate ... gateway.schema.json [-w dupbuild=err]".
+# Потребители подключают заголовок через INTERFACE-таргет infcore_schema.
+# -----------------------------------------------------------------------------
+set(INFCORE_SCHEMA_FILE ${CMAKE_CURRENT_SOURCE_DIR}/config/schema/gateway.schema.json)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${INFCORE_SCHEMA_FILE})
+file(READ ${INFCORE_SCHEMA_FILE} INFCORE_SCHEMA_JSON)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/gateway/schema_embedded.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/infcore_generated/schema_embedded.h
+    @ONLY)
+
+add_library(infcore_schema INTERFACE)
+target_include_directories(infcore_schema INTERFACE
+    ${CMAKE_CURRENT_BINARY_DIR}/infcore_generated)
+
+# -----------------------------------------------------------------------------
 # Слой «своё» (корпоративная лицензия). Общается с движком только через C-API
 # llama.h и через хелперы llama-common; файлы апстрима не редактируются.
 # -----------------------------------------------------------------------------

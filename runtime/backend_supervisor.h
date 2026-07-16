@@ -53,6 +53,9 @@ public:
     // No-op для внешних/не запущенных моделей.
     void stop(const std::string& logical_name);
 
+    // Сколько бэкендов сейчас подняты (Ready/Starting) - для gauge на /metrics.
+    int loaded_count() const;
+
 private:
     // Stopping: процесс получает SIGTERM и дожёвывается БЕЗ удержания mu_ (иначе
     // 5-секундное ожидание блокировало бы все остальные модели). Параллельные
@@ -85,7 +88,7 @@ private:
 
     Options     opt_;
     std::string api_key_;                // сгенерирован в конструкторе (per-boot)
-    std::mutex  mu_;
+    mutable std::mutex  mu_;             // mutable: loaded_count() const читает состояние под ним
     std::map<std::string, std::unique_ptr<Backend>> backends_;
     int         next_port_;
     int         starts_in_flight_ = 0;

@@ -41,8 +41,32 @@ bool AuditLog::open(const std::string& path) {
     // O_CLOEXEC: дочерние llama-server не должны наследовать fd журнала.
     fd_ = ::open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0640);
     if (fd_ < 0) return false;
+    path_ = path;   // до старта писателя: дальше path_ читает только он
     writer_ = std::thread([this] { writer_loop(); });
     return true;
+}
+
+// Переоткрытие журнала после ротации. Вызывается ТОЛЬКО из потока-писателя: fd_
+// пишется/читается без мьютекса, и писатель — его единственный владелец после open().
+void AuditLog::reopen_if_requested() {
+    if (!reopen_requested_.exchange(false, std::memory_order_acq_rel)) return;
+
+    const int nfd = ::open(path_.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0640);
+    if (nfd < 0) {
+        // Осознанно НЕ уходим в fail-closed: прежний fd жив, события продолжают
+        // фиксироваться с fsync (пусть и в уже переименованный файл), т.е. инвариант
+        // «ни один запрос не остаётся без записи» цел. Ронять трафик из-за неудачной
+        // ротации значило бы лечить хуже болезни. Ops видит счётчик и stderr.
+        reopen_failures_.fetch_add(1, std::memory_order_relaxed);
+        std::fprintf(stderr,
+            "infcore: audit: не удалось переоткрыть журнал '%s' (%s); продолжаем "
+            "писать в прежний файл — ротация де-факто не состоялась.\n",
+            path_.c_str(), std::strerror(errno));
+        return;
+    }
+    ::close(fd_);
+    fd_ = nfd;
+    reopens_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void AuditLog::log(const AuditEvent& e) {
@@ -96,6 +120,10 @@ void AuditLog::writer_loop() {
         batch.swap(queue_);                       // забрали всё -> один fsync на всех
         const unsigned long long upto = enqueued_seq_;
         lock.unlock();
+
+        // Ротация: переоткрываем ДО записи батча, чтобы события ушли уже в новый
+        // файл. Здесь fd_ гарантированно никем не используется.
+        reopen_if_requested();
 
         bool ok = true;
         int  werr = 0;

@@ -36,6 +36,20 @@ private:
     // примитивные метрики (pull, /metrics)
     std::mutex                                metrics_mu_;
     std::map<std::string, std::atomic<long>>  counters_;
+
+    // Гистограмма латентности запросов. Границы (сек) подобраны под инференс LLM:
+    // интерес не в микросекундах, а в диапазоне «доли секунды -> минуты», включая
+    // холодный старт бэкенда. Копится под metrics_mu_ вместе со счётчиками: одна
+    // запись на запрос, на фоне инференса стоимость блокировки неразличима.
+    struct LatencyHist {
+        static constexpr size_t NBOUNDS = 12;
+        static const double bounds[NBOUNDS];        // верхние границы, сек
+        unsigned long long buckets[NBOUNDS + 1]{};  // +1 = +Inf
+        unsigned long long count = 0;
+        double             sum_seconds = 0.0;
+        void observe(double seconds);
+    };
+    LatencyHist hist_;
     struct RateState {
         long long window_start_ms = 0;
         int count = 0;

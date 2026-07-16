@@ -50,8 +50,30 @@ public:
     // мог fail-closed (не отдавать трафик без аудита, если audit.require=true).
     bool failed() const { return failed_.load(std::memory_order_acquire); }
 
+    // Просит переоткрыть журнал по прежнему пути (logrotate: postrotate kill -HUP).
+    // Async-signal-safe: только взводит lock-free флаг, поэтому вызывается прямо из
+    // обработчика сигнала. Сам reopen делает поток-писатель — единственный владелец
+    // fd_ — перед записью следующего батча.
+    //
+    // Реальное переоткрытие отложено до следующего события. Это не теряет записи:
+    // раз событий нет, писать в переименованный файл нечего, а первое же новое
+    // событие уйдёт уже в новый файл. Будить писателя из обработчика нельзя —
+    // condition_variable::notify не async-signal-safe.
+    void request_reopen() { reopen_requested_.store(true, std::memory_order_release); }
+
+    // Счётчики для /metrics: сколько раз журнал переоткрыт и сколько раз reopen
+    // сорвался (последнее — повод для алерта: ротация де-факто не работает).
+    unsigned long long reopens() const { return reopens_.load(std::memory_order_relaxed); }
+    unsigned long long reopen_failures() const { return reopen_failures_.load(std::memory_order_relaxed); }
+
 private:
     void writer_loop();                   // group-commit: батч + один fsync
+    void reopen_if_requested();           // только из потока-писателя (владелец fd_)
+
+    std::string              path_;       // путь журнала для reopen; пишется в open() до старта писателя
+    std::atomic<bool>        reopen_requested_{false};
+    std::atomic<unsigned long long> reopens_{0};
+    std::atomic<unsigned long long> reopen_failures_{0};
 
     std::mutex               mu_;
     std::condition_variable  cv_work_;     // будит писателя: появилась работа/стоп

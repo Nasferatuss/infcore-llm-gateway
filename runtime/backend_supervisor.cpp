@@ -106,6 +106,11 @@ BackendSupervisor::Backend& BackendSupervisor::get_or_create(const std::string& 
     return *it->second;
 }
 
+int BackendSupervisor::loaded_count() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return loaded_count_locked();
+}
+
 int BackendSupervisor::loaded_count_locked() const {
     int n = 0;
     for (const auto& kv : backends_) {

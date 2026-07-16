@@ -98,6 +98,17 @@ void GatewayServer::audit_event(const Principal& pr, const std::string& client_i
     ev.prompt_tokens = prompt_tokens;
     ev.completion_tokens = completion_tokens;
     ev.total_tokens = total_tokens;
+
+    // Метрики снимаем здесь: через audit_event проходит КАЖДЫЙ исход запроса
+    // (allow/deny/error), поэтому одна врезка покрывает все пути без риска
+    // забыть счётчик в новой ветке. Endpoint берём как есть - это фиксированный
+    // набор маршрутов, а не пользовательский ввод, взрыва кардинальности нет.
+    inc("requests_total{endpoint=\"" + endpoint + "\",decision=\"" + std::string(decision) + "\"}");
+    if (latency_ms >= 0) {
+        std::lock_guard<std::mutex> lock(metrics_mu_);
+        hist_.observe((double)latency_ms / 1000.0);
+    }
+
     audit_.log(ev);
 }
 
@@ -109,12 +120,80 @@ long GatewayServer::get_counter(const std::string& key) {
     std::lock_guard<std::mutex> lock(metrics_mu_);
     return counters_[key].load(std::memory_order_relaxed);
 }
+// Границы гистограммы латентности (сек).
+const double GatewayServer::LatencyHist::bounds[GatewayServer::LatencyHist::NBOUNDS] = {
+    0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0
+};
+
+void GatewayServer::LatencyHist::observe(double seconds) {
+    size_t i = 0;
+    while (i < NBOUNDS && seconds > bounds[i]) ++i;
+    ++buckets[i];          // i == NBOUNDS -> корзина +Inf
+    ++count;
+    sum_seconds += seconds;
+}
+
 std::string GatewayServer::render_metrics() {
     std::lock_guard<std::mutex> lock(metrics_mu_);
     std::ostringstream os;
-    for (auto& kv : counters_)
+    os.setf(std::ios::fixed);
+
+    // Формат Prometheus/OpenMetrics: HELP/TYPE обязательны для осмысленного
+    // отображения; без них всё приезжает как untyped и rate()/histogram_quantile()
+    // на такие ряды не построить.
+    os << "# HELP infcore_gateway_errors_total Ошибки шлюза по типу.\n"
+       << "# TYPE infcore_gateway_errors_total counter\n";
+    for (auto& kv : counters_) {
+        if (kv.first.rfind("errors_total", 0) != 0) continue;
         os << "infcore_gateway_" << kv.first << " "
            << kv.second.load(std::memory_order_relaxed) << "\n";
+    }
+
+    os << "# HELP infcore_gateway_requests_total Запросы по endpoint и решению политики.\n"
+       << "# TYPE infcore_gateway_requests_total counter\n";
+    for (auto& kv : counters_) {
+        if (kv.first.rfind("requests_total", 0) != 0) continue;
+        os << "infcore_gateway_" << kv.first << " "
+           << kv.second.load(std::memory_order_relaxed) << "\n";
+    }
+
+    // Латентность: без неё деградацию под нагрузкой видно только по жалобам.
+    os << "# HELP infcore_gateway_request_duration_seconds Латентность запроса (включая холодный старт бэкенда).\n"
+       << "# TYPE infcore_gateway_request_duration_seconds histogram\n";
+    unsigned long long cum = 0;
+    for (size_t i = 0; i < LatencyHist::NBOUNDS; ++i) {
+        cum += hist_.buckets[i];
+        os.precision(2);
+        os << "infcore_gateway_request_duration_seconds_bucket{le=\"" << LatencyHist::bounds[i]
+           << "\"} " << cum << "\n";
+    }
+    cum += hist_.buckets[LatencyHist::NBOUNDS];
+    os << "infcore_gateway_request_duration_seconds_bucket{le=\"+Inf\"} " << cum << "\n";
+    os.precision(3);
+    os << "infcore_gateway_request_duration_seconds_sum " << hist_.sum_seconds << "\n"
+       << "infcore_gateway_request_duration_seconds_count " << hist_.count << "\n";
+
+    // Живость аудита. audit_failed=1 -> при audit.require=true шлюз уже отдаёт 503
+    // на весь трафик: это алерт «сервис лежит», а не «что-то подозрительное».
+    os << "# HELP infcore_gateway_audit_failed Писатель audit-журнала фатально упал (1) - трафик режется fail-closed.\n"
+       << "# TYPE infcore_gateway_audit_failed gauge\n"
+       << "infcore_gateway_audit_failed " << (audit_.failed() ? 1 : 0) << "\n";
+    os << "# HELP infcore_gateway_audit_reopens_total Переоткрытий журнала по SIGHUP (ротация).\n"
+       << "# TYPE infcore_gateway_audit_reopens_total counter\n"
+       << "infcore_gateway_audit_reopens_total " << audit_.reopens() << "\n";
+    // >0 означает: ротация не состоялась, журнал пишется в переименованный файл.
+    os << "# HELP infcore_gateway_audit_reopen_failures_total Неудачных переоткрытий журнала (ротация де-факто не работает).\n"
+       << "# TYPE infcore_gateway_audit_reopen_failures_total counter\n"
+       << "infcore_gateway_audit_reopen_failures_total " << audit_.reopen_failures() << "\n";
+
+    os << "# HELP infcore_gateway_models_configured Моделей в реестре.\n"
+       << "# TYPE infcore_gateway_models_configured gauge\n"
+       << "infcore_gateway_models_configured " << registry_.list().size() << "\n";
+    if (supervisor_) {
+        os << "# HELP infcore_gateway_backends_loaded Поднятых бэкендов llama-server (Ready/Starting).\n"
+           << "# TYPE infcore_gateway_backends_loaded gauge\n"
+           << "infcore_gateway_backends_loaded " << supervisor_->loaded_count() << "\n";
+    }
     return os.str();
 }
 
@@ -208,6 +287,13 @@ struct StreamPump {
 httplib::Server* g_active_srv = nullptr;
 void on_term(int) { if (g_active_srv) g_active_srv->stop(); }
 
+// SIGHUP = «журнал ротирован, переоткрой его» (logrotate: postrotate kill -HUP).
+// Обработчик только взводит lock-free флаг (async-signal-safe); сам reopen делает
+// поток-писатель аудита перед следующим батчем. Дефолтная реакция на SIGHUP —
+// смерть процесса, поэтому не перехватить его было бы опаснее, чем перехватить.
+AuditLog* g_active_audit = nullptr;
+void on_hup(int) { if (g_active_audit) g_active_audit->request_reopen(); }
+
 }  // namespace
 
 // --- server ------------------------------------------------------------------
@@ -231,8 +317,10 @@ int GatewayServer::run() {
         svr.set_payload_max_length((size_t)cfg_.max_body_bytes);
 
     g_active_srv = &svr;
+    g_active_audit = &audit_;
     std::signal(SIGINT, on_term);
     std::signal(SIGTERM, on_term);
+    std::signal(SIGHUP, on_hup);     // ротация audit-журнала: переоткрыть по прежнему пути
     std::signal(SIGPIPE, SIG_IGN);   // оборванный клиент при SSE не должен ронять gateway
     std::signal(SIGXFSZ, SIG_IGN);   // лимит размера файла аудита -> EFBIG (fail-closed), а не kill
 
@@ -351,7 +439,11 @@ int GatewayServer::run() {
                                                    httplib::Response& res) {
             const std::string request_id = make_request_id();
             const long long started_ms = steady_ms();
-            inc(std::string("requests_total{path=\"") + upstream_path + "\"}");
+            // Счётчик запросов снимается в audit_event() - там он покрывает ВСЕ
+            // маршруты и несёт decision. Прежний inc(requests_total{path=...})
+            // здесь дублировал его для одних лишь прокси-эндпоинтов, да ещё с
+            // другим набором меток под тем же именем метрики (Prometheus такого
+            // не допускает).
             Principal pr;
             if (!authn_.verify(auth_token(req), pr)) { inc("errors_total{type=\"unauthorized\"}");
                 audit_event({}, req.remote_addr, upstream_path, "", "deny", "unauthorized", 401, request_id);

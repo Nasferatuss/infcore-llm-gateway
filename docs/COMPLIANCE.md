@@ -1,7 +1,7 @@
 # Compliance: лицензии и происхождение
 
-Проект **на аккредитацию/в реестр не подаётся**. Этот документ фиксирует только
-корректное использование открытого ПО (атрибуция лицензий) и условие развёртывания.
+Этот документ фиксирует корректное использование открытого ПО (атрибуция
+лицензий) и условие развёртывания.
 
 ## Условие развёртывания
 infcore разворачивается **локально на компьютере/сервере в РФ**, строго offline
@@ -16,15 +16,15 @@ infcore **построен на базе open-source llama.cpp (ggml authors, MI
 ## Лицензии
 | Компонент | Лицензия | Где |
 |---|---|---|
-| ggml / llama.cpp (движок) | MIT (The ggml authors) | `LICENSE` (корень форка) |
-| nlohmann/json | MIT | `infcore/THIRD_PARTY_LICENSES/nlohmann-json.txt` |
-| cpp-httplib / stb / miniaudio / sheredom | MIT / Public Domain / Unlicense | `infcore/THIRD_PARTY_LICENSES/*` |
-| infcore (свой слой) | Проприетарная | `infcore/LICENSE`, `infcore/NOTICE` |
+| ggml / llama.cpp (движок) | MIT (The ggml authors) | `THIRD_PARTY_LICENSES/ggml-llama.cpp.txt` |
+| nlohmann/json | MIT | `THIRD_PARTY_LICENSES/nlohmann-json.txt` |
+| cpp-httplib / stb / miniaudio / sheredom | MIT / Public Domain / Unlicense | `THIRD_PARTY_LICENSES/*` |
+| infcore (свой слой) | MIT | `LICENSE`, `NOTICE` |
 
-Артефакты (в `infcore/`): `LICENSE`, `NOTICE`, `THIRD_PARTY_LICENSES/` (полные тексты
+Артефакты: `LICENSE`, `NOTICE`, `THIRD_PARTY_LICENSES/` (полные тексты
 лицензий на каждый компонент), `sbom.cdx.json` (CycloneDX 1.5, компоненты с версиями,
-UPSTREAM_COMMIT в purl). Docker runtime image также включает корневой `LICENSE` как
-`/opt/infcore/LICENSE.llama.cpp`. Пин версии апстрима — `UPSTREAM_COMMIT` (корень форка).
+базовый коммит апстрима в purl). Docker runtime image также включает лицензию движка
+как `/opt/infcore/LICENSE.llama.cpp`. Пин версии апстрима — см. `NOTICE`.
 
 Для релиза запускается `infcore/scripts/release-manifest.sh`: он генерирует
 `release-manifest.json` и `SHA256SUMS` для бинарей, лицензий и SBOM. При

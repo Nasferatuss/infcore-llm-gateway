@@ -54,7 +54,7 @@ active-token на RAII (аборт клиента не течёт в счётч�
   этот код **не удалён, а нейтрализован**: супервайзер никогда не передаёт
   download-триггерящих аргументов, а egress блокируется на инфра-уровне (systemd
   `IPAddressDeny`, docker `internal: true`) и проверкой `enforce_no_egress` для
-  внешних `backend_url` (только loopback/RFC1918). См. `../AUDIT.md`.
+  внешних `backend_url` (только loopback/RFC1918).
 - Зависимости — из внутренних зеркал.
 
 ## Модели и модальности

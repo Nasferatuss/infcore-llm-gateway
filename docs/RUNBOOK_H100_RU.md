@@ -37,13 +37,14 @@ audit-журнал в `/var/log`.
 ## 1. Код
 
 ```sh
-$ git clone --depth 1 https://gitverse.ru/nasferatus/llama.cpp infcore-src
-$ cd infcore-src
-$ git rev-parse --abbrev-ref HEAD      # ожидаем: infcore
+$ git clone --depth 1 https://github.com/ggml-org/llama.cpp engine-src
+$ git clone --depth 1 https://github.com/Nasferatuss/infcore-llm-gateway engine-src/infcore
+$ cd engine-src
 ```
 
-`git checkout` не нужен: в репозитории **одна ветка `infcore`**, и HEAD указывает
-на неё — клон сразу даёт нужное состояние.
+infcore собирается как слой поверх дерева llama.cpp: движок берётся из апстрима,
+слой — из этого репозитория. Базовый коммит движка, на котором слой проверялся,
+зафиксирован в `NOTICE`.
 
 Ветка содержит **весь** исходник llama.cpp плюс каталог `infcore/`; движок в ней
 побайтово совпадает с апстримом (правило «обернуть, не трогая ядро»). Отдельно

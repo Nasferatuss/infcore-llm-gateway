@@ -1,15 +1,18 @@
 infcore
-Copyright (c) 2026 Nasferatuss / infcore authors. Корпоративная лицензия (см. infcore/LICENSE).
+Copyright (c) 2026 Max Terentjev. Распространяется по лицензии MIT (см. LICENSE).
 
 ==============================================================================
 Продукт СОЗДАН НА БАЗЕ ПО с открытым исходным кодом и НЕ скрывает происхождение.
 ==============================================================================
 
-Движок (весь форк вне каталога infcore/) — используется по лицензии:
+Движок, поверх которого работает этот слой, — используется по лицензии:
   llama.cpp / ggml — Copyright (c) 2023-2026 The ggml authors — MIT
   Источник: https://github.com/ggml-org/llama.cpp
-  Зафиксированный коммит: см. UPSTREAM_COMMIT в корне форка.
+  Зафиксированный базовый коммит: e8ecce53b872257e173d9d491a57e7a09c7cd8cb (2026-06-25)
 
-Бандл-зависимости движка (vendor/): cpp-httplib (MIT), nlohmann/json (MIT),
+Код движка в состав этого репозитория не входит: infcore собирается как слой
+поверх дерева llama.cpp и общается с ним по HTTP (см. README, «Сборка»).
+
+Бандл-зависимости движка: cpp-httplib (MIT), nlohmann/json (MIT),
 stb (MIT/Public Domain), miniaudio (MIT/Public Domain), sheredom (Unlicense).
-Полные тексты: infcore/THIRD_PARTY_LICENSES/ и sbom.cdx.json.
+Полные тексты: THIRD_PARTY_LICENSES/ и sbom.cdx.json.

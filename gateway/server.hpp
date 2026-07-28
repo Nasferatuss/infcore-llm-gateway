@@ -1,4 +1,4 @@
-// infcore gateway — корпоративная лицензия.
+// infcore gateway — лицензия MIT (см. LICENSE).
 // OpenAI-совместимый gateway: control-plane (auth/registry/routing/metrics) перед
 // бэкендами llama-server. Прокси с passthrough SSE для stream-ответов.
 #pragma once

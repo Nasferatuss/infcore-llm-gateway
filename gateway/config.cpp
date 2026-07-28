@@ -1,4 +1,4 @@
-// infcore gateway — корпоративная лицензия.
+// infcore gateway — лицензия MIT (см. LICENSE).
 #include "config.hpp"
 
 #include <cctype>

@@ -1,4 +1,4 @@
-# infcore gateway — корпоративная лицензия.
+# infcore gateway — лицензия MIT (см. LICENSE).
 # Строится РЯДОМ с tools/server (его файлы не редактируем). OpenAI-совместимый
 # control-plane перед бэкендами llama-server. Использует vendored cpp-httplib +
 # nlohmann/json из дерева движка; с ядром общается через C-API llama.h.

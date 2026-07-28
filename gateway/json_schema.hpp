@@ -1,4 +1,4 @@
-// infcore gateway — корпоративная лицензия.
+// infcore gateway — лицензия MIT (см. LICENSE).
 // Минимальный валидатор JSON-Schema (подмножество draft 2020-12, которое реально
 // используется в gateway.schema.json): type, required, properties,
 // additionalProperties:false, enum, items, minimum/maximum, minItems, pattern,

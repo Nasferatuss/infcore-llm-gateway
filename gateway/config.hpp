@@ -1,4 +1,4 @@
-// infcore gateway — корпоративная лицензия.
+// infcore gateway — лицензия MIT (см. LICENSE).
 // Загрузка конфигурации gateway из JSON (валиден и как YAML-подмножество).
 #pragma once
 

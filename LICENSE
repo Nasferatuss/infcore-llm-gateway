@@ -1,17 +1,21 @@
-ПРОПРИЕТАРНАЯ ЛИЦЕНЗИЯ infcore
-Copyright (c) 2026 Nasferatuss / infcore authors. Все права защищены.
+MIT License
 
-Применяется к содержимому каталога infcore/. Остальной код форка (движок llama.cpp)
-распространяется под лицензией MIT (The ggml authors) — см. ../LICENSE и NOTICE.
+Copyright (c) 2026 Max Terentjev
 
-Копирование, распространение, модификация, публичная публикация, предоставление
-как сервиса и коммерческое использование содержимого infcore/ разрешены только
-по отдельному письменному соглашению с правообладателем.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-Если отдельное соглашение отсутствует, получатель может использовать этот код
-только для внутренней оценки и сопровождения данного репозитория. Никакие права
-на товарные знаки, патенты или сублицензирование не предоставляются.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-Код предоставляется "как есть", без гарантий пригодности для конкретной цели,
-без обязательств поддержки и без ответственности правообладателя за любые
-прямые или косвенные убытки, насколько это допускается применимым правом.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

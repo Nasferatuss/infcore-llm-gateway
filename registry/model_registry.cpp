@@ -1,4 +1,4 @@
-// infcore — корпоративная лицензия.
+// infcore — лицензия MIT (см. LICENSE).
 #include "model_registry.h"
 
 namespace infcore {

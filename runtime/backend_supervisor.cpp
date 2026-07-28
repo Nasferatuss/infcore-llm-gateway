@@ -1,4 +1,4 @@
-// infcore runtime — корпоративная лицензия.
+// infcore runtime — лицензия MIT (см. LICENSE).
 #include "backend_supervisor.h"
 
 #include <signal.h>

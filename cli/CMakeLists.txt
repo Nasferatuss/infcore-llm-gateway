@@ -1,4 +1,4 @@
-# infcore CLI — корпоративная лицензия.
+# infcore CLI — лицензия MIT (см. LICENSE).
 # Терминальный клиент к gateway (HTTP). С ядром не линкуется: только vendored
 # cpp-httplib + nlohmann/json.
 add_executable(infcore_cli main.cpp)

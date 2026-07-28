@@ -1,4 +1,4 @@
-# infcore runtime — корпоративная лицензия.
+# infcore runtime — лицензия MIT (см. LICENSE).
 # Lazy-supervisor дочерних процессов llama-server. Использует vendored cpp-httplib
 # для health-поллинга; с движком не линкуется (управляет им как отдельным процессом).
 add_library(infcore_runtime STATIC

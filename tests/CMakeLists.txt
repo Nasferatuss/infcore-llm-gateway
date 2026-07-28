@@ -1,4 +1,4 @@
-# infcore tests — корпоративная лицензия. Юнит-тесты слоя gateway (без движка).
+# infcore tests — лицензия MIT (см. LICENSE). Юнит-тесты слоя gateway (без движка).
 # Используют ту же встроенную JSON-Schema, что и gateway (config.cpp её требует):
 # заголовок генерируется один раз в infcore/CMakeLists.txt, подключается через
 # INTERFACE-таргет infcore_schema.

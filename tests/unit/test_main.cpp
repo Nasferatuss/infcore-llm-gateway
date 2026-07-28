@@ -1,4 +1,4 @@
-// infcore — корпоративная лицензия. Юнит-тесты слоя gateway (без движка/сети).
+// infcore — лицензия MIT (см. LICENSE). Юнит-тесты слоя gateway (без движка/сети).
 // Минимальный assert-харнесс (без внешних зависимостей, offline).
 #include <cstdio>
 #include <fstream>

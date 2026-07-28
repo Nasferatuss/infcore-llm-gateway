@@ -1,4 +1,4 @@
-// infcore CLI — корпоративная лицензия.
+// infcore CLI — лицензия MIT (см. LICENSE).
 // Терминальный клиент к gateway: список моделей, переключение (admin), чат.
 // Адрес/ключ: флаги --url/--key либо env INFCORE_URL/INFCORE_KEY.
 #include <cstdio>

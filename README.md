@@ -138,8 +138,7 @@ bundled dependency are in [NOTICE](NOTICE), `THIRD_PARTY_LICENSES/` and
 
 ## Documentation
 
-Detailed docs live under `docs/` (`ARCHITECTURE.md`, `DEPLOY.md` and
-`COMPLIANCE.md` are in Russian for now):
+Detailed docs live under `docs/`:
 
 | File | Contents |
 |---|---|

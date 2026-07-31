@@ -1,38 +1,45 @@
-# Базовые образы infcore (build + runtime)
+# infcore base images (build + runtime)
 
-`infcore/deploy/docker/Dockerfile` ссылается на два заранее собранных образа:
+`infcore/deploy/docker/Dockerfile` refers to two pre-built images:
 
-| ARG | По умолчанию | Назначение |
+| ARG | Default | Purpose |
 |---|---|---|
-| `BASE_BUILD` | `infcore/base-devel:1.7` | стадия сборки (toolchain, SDK) |
-| `BASE_RUNTIME` | `infcore/base-runtime:1.7` | стадия рантайма (только рантайм-либы) |
+| `BASE_BUILD` | `infcore/base-devel:1.7` | the build stage (toolchain, SDK) |
+| `BASE_RUNTIME` | `infcore/base-runtime:1.7` | the runtime stage (runtime libs only) |
 
-Этих образов нет ни в апстриме, ни в публичных реестрах — их собирают один раз.
-Здесь лежат **скелеты-рецепты** (`Dockerfile.base-devel`, `Dockerfile.base-runtime`):
-они стартуют с публичного `debian:12-slim`, чтобы собираться как есть. Адаптируйте
-`FROM` и имена пакетов под базовую ОС вашего контура, соберите и запушьте в его реестр
-под теми же тегами (или переопределите `--build-arg BASE_BUILD=... BASE_RUNTIME=...`
-при сборке основного образа).
+These images exist neither upstream nor in public registries — they get built
+once. The **recipe skeletons** live here (`Dockerfile.base-devel`,
+`Dockerfile.base-runtime`): they start from public `debian:12-slim` so they
+build as-is. Adapt `FROM` and the package names to your enclave's base OS,
+build and push to its registry under the same tags (or override
+`--build-arg BASE_BUILD=... BASE_RUNTIME=...` when building the main image).
 
-## Что ОБЯЗАНО быть в build-образе
-- C++17-компилятор (gcc/g++ >= 11), `make`, `ninja` (опц.), `git` (для номера сборки);
+## What the build image MUST have
+- a C++17 compiler (gcc/g++ >= 11), `make`, `ninja` (optional), `git` (for the
+  build number);
 - CMake >= 3.21;
-- **CUDA toolkit** (nvcc) — версия под ваш парк GPU (arch пинуется в `profile-portable.cmake`:
-  `75;80;86;89;90`); GPU на стадии сборки НЕ нужен, т.к. `native` не используется;
-- **Vulkan SDK** — заголовки + `glslc`/`glslangValidator` (нужны для компиляции шейдеров
-  ggml-vulkan на этапе сборки).
-- Всё — из внутреннего зеркала пакетов (интернет доступен ТОЛЬКО на стадии build-образа).
+- the **CUDA toolkit** (nvcc) — a version matching your GPU fleet (the arch is
+  pinned in `profile-portable.cmake`: `75;80;86;89;90`); a GPU is NOT needed at
+  build time, since `native` is not used;
+- the **Vulkan SDK** — headers + `glslc`/`glslangValidator` (needed to compile
+  ggml-vulkan's shaders at build time).
+- Everything from an internal package mirror (internet is available ONLY at
+  the build-image stage).
 
-## Что ОБЯЗАНО быть в runtime-образе
-- glibc + libstdc++ (совместимые с build-образом), `libgomp` (OpenMP);
-- **CUDA runtime** (`libcudart`, `libcublas`) — при `GGML_CUDA=ON`;
-- **Vulkan loader** (`libvulkan.so` + ICD вашего драйвера) — при `GGML_VULKAN=ON`;
-- НИКАКИХ toolchain/SDK (меньше attack surface). Драйвер NVIDIA пробрасывается
-  `nvidia-container-toolkit` с хоста, в образ не кладётся.
-- Для **CPU-only** контура ни CUDA, ни Vulkan рантайм не нужны — соберите основной
-  образ из профиля с `-DGGML_CUDA=OFF -DGGML_VULKAN=OFF`.
+## What the runtime image MUST have
+- glibc + libstdc++ (compatible with the build image), `libgomp` (OpenMP);
+- the **CUDA runtime** (`libcudart`, `libcublas`) — when `GGML_CUDA=ON`;
+- the **Vulkan loader** (`libvulkan.so` + your driver's ICD) — when
+  `GGML_VULKAN=ON`;
+- NO toolchain/SDK (smaller attack surface). The NVIDIA driver is passed
+  through by `nvidia-container-toolkit` from the host, not baked into the
+  image.
+- For a **CPU-only** enclave, neither the CUDA nor the Vulkan runtime is
+  needed — build the main image from a profile with
+  `-DGGML_CUDA=OFF -DGGML_VULKAN=OFF`.
 
-## Проверка совместимости
-Версия CUDA runtime в base-runtime должна быть >= CUDA toolkit в base-devel; Vulkan
-loader — не старше SDK. Иначе `llama-server` не стартует, gateway вернёт `502 backend
-start failed` (при `audit.require=true` это громкая ошибка, не тихий простой).
+## Compatibility check
+The CUDA runtime version in base-runtime must be >= the CUDA toolkit version in
+base-devel; the Vulkan loader must be no older than the SDK. Otherwise
+`llama-server` fails to start and the gateway returns `502 backend start
+failed` (with `audit.require=true` this is a loud error, not a silent outage).

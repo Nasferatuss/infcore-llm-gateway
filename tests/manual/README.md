@@ -1,31 +1,37 @@
-# infcore — ручные hardening-тесты шлюза
+# infcore — manual gateway hardening tests
 
-Проверяют прод-фиксы против **фейкового** бэкенда (реальные модели/GPU не нужны).
-Дополняют автоматические `tests/unit` (ctest) и `tests/egress`.
+Verify production fixes against a **fake** backend (no real models/GPU
+needed). Complement the automated `tests/unit` (ctest) and `tests/egress`.
 
-## Состав
-- `hardening_smoke.sh` — прогоняет 4 проверки, печатает PASS/FAIL, ненулевой код при провале:
-  - **M5** — тело запроса сверх лимита → `413`;
-  - **B3** — `mu_` супервайзера не держится во время `SIGTERM→SIGKILL`
-    (`/health` отвечает мгновенно, пока «неубиваемый» бэкенд дожёвывается);
-  - **F1** — `disable` во время старта бэкенда не теряется (инициатор → `502`,
-    бэкенд погашен, не доживает до idle-таймаута);
-  - **F2** — рантайм-сбой аудита (диск полон) → fail-closed `503` при `audit.require=true`,
-    `/health` = `degraded`, громкий stderr.
-- `fake_llama_server.py` — фейковый llama-server (флаги `--ready-delay`, `--ignore-sigterm`).
-- `rlimit_exec.py` — запуск процесса с `RLIMIT_FSIZE` (детерминированная имитация «диск полон»).
+## Contents
+- `hardening_smoke.sh` — runs 4 checks, prints PASS/FAIL, exits non-zero on
+  failure:
+  - **M5** — a request body over the limit → `413`;
+  - **B3** — the supervisor's `mu_` is not held during `SIGTERM→SIGKILL`
+    (`/health` responds instantly while an "unkillable" backend is still being
+    reaped);
+  - **F1** — a `disable` during backend startup is not lost (the initiator
+    gets `502`, the backend is shut down, it does not linger to the idle
+    timeout);
+  - **F2** — a runtime audit failure (disk full) → fail-closed `503` when
+    `audit.require=true`, `/health` = `degraded`, a loud stderr message.
+- `fake_llama_server.py` — a fake llama-server (`--ready-delay`,
+  `--ignore-sigterm` flags).
+- `rlimit_exec.py` — runs a process under `RLIMIT_FSIZE` (a deterministic
+  simulation of "disk full").
 
-## Запуск
+## Running
 ```sh
-# 1. Собрать шлюз (CPU-only достаточно):
+# 1. Build the gateway (CPU-only is enough):
 cmake -S infcore -B build -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target infcore_gateway -j
 
-# 2. Прогнать:
+# 2. Run:
 infcore/tests/manual/hardening_smoke.sh ./build/bin/infcore_gateway
 ```
-Требуется `python3`, `curl`, `bash`. Ожидаемый итог: `PASS=7 FAIL=0`.
+Requires `python3`, `curl`, `bash`. Expected result: `PASS=7 FAIL=0`.
 
-Прочие блокеры проверяются иначе: **M1** (обход egress) — в `tests/unit`
-(`ctest -R infcore_unit`); **M3** (durability аудита) — стресс-нагрузкой
-(параллельные запросы к работающему шлюзу, сверка числа строк в журнале).
+The remaining blockers are verified differently: **M1** (egress bypass) — in
+`tests/unit` (`ctest -R infcore_unit`); **M3** (audit durability) — by stress
+load (concurrent requests against a running gateway, checked against the
+number of lines in the log).

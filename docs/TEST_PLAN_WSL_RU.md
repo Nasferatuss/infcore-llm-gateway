@@ -1,7 +1,8 @@
-# Тестирование infcore на MSI Sword 16 HX / RTX 4070 / WSL2
+# Тестирование infcore на потребительской GPU под WSL2
 
-Цель: проверить `infcore_gateway` с локальной Qwen 3.5 GGUF-моделью на ноутбуке
-MSI Sword 16 HX B13VFKG: Intel Core i7-13700HX, 64 GB RAM, RTX 4070 8 GB, Windows 11 Pro.
+Цель: проверить `infcore_gateway` с локальной Qwen 3.5 GGUF-моделью на обычном
+ноутбуке с дискретной NVIDIA. Референсная конфигурация, на которой план
+прогонялся: Core i7-13700HX, 64 GB RAM, RTX 4070 8 GB, Windows 11 Pro.
 
 Для `infcore_gateway` основной сценарий теста — WSL2 Ubuntu. Windows остаётся хостом
 с NVIDIA-драйвером и GPU, а gateway/backend запускаются внутри Linux-среды WSL2.
@@ -219,7 +220,7 @@ cat > ~/infcore-config/gateway.local.json <<EOF
       "sha256": "$SHA",
       "size_bytes": $SIZE,
       "license": "local-test",
-      "source": "local-msi-sword",
+      "source": "local-test-laptop",
       "modality": "text",
       "enabled": true,
       "n_ctx": 4096,

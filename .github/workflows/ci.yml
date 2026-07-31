@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: build (cpu profile) + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      # infcore is not standalone: it builds as a subtree inside a llama.cpp
+      # checkout. The job therefore reproduces exactly the Quickstart in the
+      # README — if this is green, the documented build works from a clean box.
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          path: engine-src
+          fetch-depth: 1
+
+      - name: Check out infcore into the engine tree
+        uses: actions/checkout@v4
+        with:
+          path: engine-src/infcore
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev
+
+      - name: Configure (GPU-less profile)
+        working-directory: engine-src
+        run: cmake -S infcore -B build -C infcore/cmake/profile-cpu.cmake
+
+      - name: Build
+        working-directory: engine-src
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Unit tests
+        working-directory: engine-src
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Both binaries exist and run
+        working-directory: engine-src
+        run: |
+          ./build/bin/infcore-cli | head -1
+          ./build/bin/infcore_gateway --help || true

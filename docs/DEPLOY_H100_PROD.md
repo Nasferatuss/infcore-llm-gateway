@@ -17,7 +17,7 @@ cmake -S infcore -B build -C infcore/cmake/profile-h100.cmake
 cmake --build build -j"$(nproc)"
 ```
 
-> ⚠️ **Не копируйте команду сборки из [WINDOWS_WSL_MSI_TEST_PLAN_RU.md](WINDOWS_WSL_MSI_TEST_PLAN_RU.md).**
+> ⚠️ **Не копируйте команду сборки из [TEST_PLAN_WSL_RU.md](TEST_PLAN_WSL_RU.md).**
 > Тест-план писался под RTX 4070 Laptop и задаёт `-DCMAKE_CUDA_ARCHITECTURES=89`
 > (Ada). Собранный так бинарь **не несёт CUDA-ядер для H100**.
 

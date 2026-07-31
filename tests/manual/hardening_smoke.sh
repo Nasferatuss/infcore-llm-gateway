@@ -105,9 +105,9 @@ EOF
 sleep 1.5   # backendA в Starting
 curl -s -m5 -X POST http://127.0.0.1:18092/admin/models/a/disable -H "Authorization: Bearer $KEY" >/dev/null
 wait "$RPID"
-grep -q "отключена во время старта" "$TMP/f1.out" \
+grep -q "disabled while starting" "$TMP/f1.out" \
   && ok "запрос-инициатор получил 502 (disable учтён)" \
-  || no "ожидал 502 'отключена во время старта', получил: $(cat "$TMP/f1.out")"
+  || no "ожидал 502 'disabled while starting', получил: $(cat "$TMP/f1.out")"
 sleep 1
 if pgrep -f "fake_llama_server.py" >/dev/null; then no "бэкенд жив — disable потерян"; else ok "бэкенд погашен (не дожил до idle-таймаута)"; fi
 kill "$GWPID" 2>/dev/null; sleep 1; echo

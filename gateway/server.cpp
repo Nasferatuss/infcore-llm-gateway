@@ -40,8 +40,8 @@ GatewayServer::GatewayServer(GatewayConfig cfg) : cfg_(std::move(cfg)) {
     // Обратная совместимость: плоские api_keys = principal'ы с ролью admin.
     if (!cfg_.api_keys.empty()) {
         std::fprintf(stderr,
-            "infcore: ВНИМАНИЕ: security.api_keys (legacy) дают роль admin с subject "
-            "'legacy' и слабо аудируются; переходите на security.principals + roles.\n");
+            "infcore: WARNING: security.api_keys (legacy) grant the admin role with subject "
+            "'legacy' and audit poorly; move to security.principals + roles.\n");
         if (!has_admin_role) {
             Role admin; admin.name = "admin";
             admin.allow_models = {"*"}; admin.allow_endpoints = {"*"};
@@ -53,11 +53,11 @@ GatewayServer::GatewayServer(GatewayConfig cfg) : cfg_(std::move(cfg)) {
     // Аудит обязателен для контура: если журнал (sink=file) не открылся, НЕ отдаём
     // трафик с молча выключенным аудитом - fail-fast (пока audit.require не снят явно).
     if (cfg_.audit_sink == "file" && !audit_.open(cfg_.audit_path)) {
-        std::string msg = "infcore: не удалось открыть audit-журнал: " + cfg_.audit_path +
-            " (проверьте, что каталог существует и доступен на запись пользователю сервиса)";
+        std::string msg = "infcore: could not open the audit journal: " + cfg_.audit_path +
+            " (check that the directory exists and is writable by the service user)";
         if (cfg_.audit_require)
-            throw std::runtime_error(msg + "; audit.require=true -> старт прерван");
-        std::fprintf(stderr, "%s; audit.require=false -> продолжаю БЕЗ аудита\n", msg.c_str());
+            throw std::runtime_error(msg + "; audit.require=true -> startup aborted");
+        std::fprintf(stderr, "%s; audit.require=false -> continuing WITHOUT audit\n", msg.c_str());
     }
 }
 
@@ -180,7 +180,7 @@ std::string GatewayServer::render_metrics() {
     // Формат Prometheus/OpenMetrics: HELP/TYPE обязательны для осмысленного
     // отображения; без них всё приезжает как untyped и rate()/histogram_quantile()
     // на такие ряды не построить.
-    os << "# HELP infcore_gateway_errors_total Ошибки шлюза по типу.\n"
+    os << "# HELP infcore_gateway_errors_total Gateway errors by type.\n"
        << "# TYPE infcore_gateway_errors_total counter\n";
     for (auto& kv : counters_) {
         if (kv.first.rfind("errors_total", 0) != 0) continue;
@@ -188,7 +188,7 @@ std::string GatewayServer::render_metrics() {
            << kv.second.load(std::memory_order_relaxed) << "\n";
     }
 
-    os << "# HELP infcore_gateway_requests_total Запросы по endpoint и решению политики.\n"
+    os << "# HELP infcore_gateway_requests_total Requests by endpoint and policy decision.\n"
        << "# TYPE infcore_gateway_requests_total counter\n";
     for (auto& kv : counters_) {
         if (kv.first.rfind("requests_total", 0) != 0) continue;
@@ -197,7 +197,7 @@ std::string GatewayServer::render_metrics() {
     }
 
     // Латентность: без неё деградацию под нагрузкой видно только по жалобам.
-    os << "# HELP infcore_gateway_request_duration_seconds Латентность запроса (включая холодный старт бэкенда).\n"
+    os << "# HELP infcore_gateway_request_duration_seconds Request latency (including backend cold start).\n"
        << "# TYPE infcore_gateway_request_duration_seconds histogram\n";
     unsigned long long cum = 0;
     for (size_t i = 0; i < LatencyHist::NBOUNDS; ++i) {
@@ -214,22 +214,22 @@ std::string GatewayServer::render_metrics() {
 
     // Живость аудита. audit_failed=1 -> при audit.require=true шлюз уже отдаёт 503
     // на весь трафик: это алерт «сервис лежит», а не «что-то подозрительное».
-    os << "# HELP infcore_gateway_audit_failed Писатель audit-журнала фатально упал (1) - трафик режется fail-closed.\n"
+    os << "# HELP infcore_gateway_audit_failed The audit journal writer failed fatally (1) - traffic is cut fail-closed.\n"
        << "# TYPE infcore_gateway_audit_failed gauge\n"
        << "infcore_gateway_audit_failed " << (audit_.failed() ? 1 : 0) << "\n";
-    os << "# HELP infcore_gateway_audit_reopens_total Переоткрытий журнала по SIGHUP (ротация).\n"
+    os << "# HELP infcore_gateway_audit_reopens_total Journal reopens on SIGHUP (rotation).\n"
        << "# TYPE infcore_gateway_audit_reopens_total counter\n"
        << "infcore_gateway_audit_reopens_total " << audit_.reopens() << "\n";
     // >0 означает: ротация не состоялась, журнал пишется в переименованный файл.
-    os << "# HELP infcore_gateway_audit_reopen_failures_total Неудачных переоткрытий журнала (ротация де-факто не работает).\n"
+    os << "# HELP infcore_gateway_audit_reopen_failures_total Failed journal reopens (rotation is not actually working).\n"
        << "# TYPE infcore_gateway_audit_reopen_failures_total counter\n"
        << "infcore_gateway_audit_reopen_failures_total " << audit_.reopen_failures() << "\n";
 
-    os << "# HELP infcore_gateway_models_configured Моделей в реестре.\n"
+    os << "# HELP infcore_gateway_models_configured Models in the registry.\n"
        << "# TYPE infcore_gateway_models_configured gauge\n"
        << "infcore_gateway_models_configured " << registry_.list().size() << "\n";
     if (supervisor_) {
-        os << "# HELP infcore_gateway_backends_loaded Поднятых бэкендов llama-server (Ready/Starting).\n"
+        os << "# HELP infcore_gateway_backends_loaded llama-server backends up (Ready/Starting).\n"
            << "# TYPE infcore_gateway_backends_loaded gauge\n"
            << "infcore_gateway_backends_loaded " << supervisor_->loaded_count() << "\n";
     }
@@ -498,7 +498,7 @@ int GatewayServer::run() {
             try { body = json::parse(req.body); }
             catch (...) { inc("errors_total{type=\"bad_request\"}");
                 audit_event(pr, client_ip, upstream_path, "", "deny", "invalid JSON", 400, request_id);
-                return error_json(res, 400, "invalid_request_error", "невалидный JSON"); }
+                return error_json(res, 400, "invalid_request_error", "invalid JSON"); }
 
             if (!body.contains("model") || !body.at("model").is_string()) {
                 inc("errors_total{type=\"bad_request\"}");
@@ -544,7 +544,7 @@ int GatewayServer::run() {
                     audit_event(pr, client_ip, upstream_path, model, "error", "backend start failed", 502,
                                 request_id, logical, e.sha256, steady_ms() - started_ms,
                                 static_cast<long long>(req.body.size()), 0);
-                    return error_json(res, 502, "api_error", "не удалось поднять бэкенд: " + serr); }
+                    return error_json(res, 502, "api_error", "could not start backend: " + serr); }
                 supervisor_->acquire(logical);
                 BackendSupervisor* sup = supervisor_.get();
                 active_token = std::shared_ptr<void>(nullptr, [sup, logical](void*) { sup->release(logical); });
@@ -579,7 +579,7 @@ int GatewayServer::run() {
                     audit_event(pr, client_ip, upstream_path, model, "error", "backend unreachable", 502,
                                 request_id, logical, e.sha256, steady_ms() - started_ms,
                                 static_cast<long long>(out_body.size()), 0);
-                    return error_json(res, 502, "api_error", "бэкенд недоступен: " + backend); }
+                    return error_json(res, 502, "api_error", "backend unavailable: " + backend); }
                 res.status = up->status;
                 res.set_content(up->body, up->has_header("Content-Type")
                                               ? up->get_header_value("Content-Type")
@@ -655,7 +655,7 @@ int GatewayServer::run() {
                             static_cast<long long>(ebody.size()));
                 res.status = st;
                 if (!ebody.empty()) res.set_content(ebody, "application/json");
-                else error_json(res, st, "api_error", "бэкенд вернул ошибку");
+                else error_json(res, st, "api_error", "backend returned an error");
                 return;  // active_token освобождается здесь
             }
 
@@ -706,12 +706,12 @@ int GatewayServer::run() {
     svr.Post("/rerank",              proxy("/rerank", false));
     svr.Post("/reranking",           proxy("/reranking", false));
 
-    std::printf("infcore gateway слушает http://%s:%d (моделей: %zu)\n",
+    std::printf("infcore gateway listening on http://%s:%d (models: %zu)\n",
                 cfg_.host.c_str(), cfg_.port, cfg_.models.size());
     bool ok = svr.listen(cfg_.host, cfg_.port);
     g_active_srv = nullptr;
     if (!ok) {
-        std::fprintf(stderr, "infcore: не удалось слушать %s:%d\n",
+        std::fprintf(stderr, "infcore: could not listen on %s:%d\n",
                      cfg_.host.c_str(), cfg_.port);
         return 1;
     }

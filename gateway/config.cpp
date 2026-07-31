@@ -35,12 +35,12 @@ static std::string resolve_secret(const std::string& v) {
     if (v.rfind("env:", 0) == 0) {
         const char* e = std::getenv(v.c_str() + 4);
         if (!e || !*e)
-            throw std::runtime_error("infcore: переменная окружения не задана: " + v.substr(4));
+            throw std::runtime_error("infcore: environment variable is not set: " + v.substr(4));
         return e;
     }
     if (v.rfind("file:", 0) == 0) {
         std::ifstream f(v.substr(5));
-        if (!f) throw std::runtime_error("infcore: не удалось прочитать файл секрета: " + v.substr(5));
+        if (!f) throw std::runtime_error("infcore: could not read secret file: " + v.substr(5));
         std::stringstream ss; ss << f.rdbuf();
         std::string s = ss.str();
         while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
@@ -64,7 +64,7 @@ static bool weak_secret(const std::string& key) {
 
 static std::string sha256_file(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
-    if (!f) throw std::runtime_error("infcore: не удалось открыть artifact для sha256: " + path);
+    if (!f) throw std::runtime_error("infcore: could not open artifact for sha256: " + path);
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     if (!ctx) throw std::runtime_error("infcore: EVP_MD_CTX_new failed");
     if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
@@ -104,29 +104,29 @@ static void validate_artifact_integrity(const std::string& path, const std::stri
     const bool check = required || !sha256.empty() || size_bytes > 0;
     if (!check) return;
     if (path.empty())
-        throw std::runtime_error("infcore: " + label + " требует path для integrity validation");
+        throw std::runtime_error("infcore: " + label + " requires path for integrity validation");
     if (required && sha256.empty())
-        throw std::runtime_error("infcore: " + label + " требует sha256 при require_model_integrity=true");
+        throw std::runtime_error("infcore: " + label + " requires sha256 when require_model_integrity=true");
     if (required && size_bytes <= 0)
-        throw std::runtime_error("infcore: " + label + " требует size_bytes при require_model_integrity=true");
+        throw std::runtime_error("infcore: " + label + " requires size_bytes when require_model_integrity=true");
     struct stat st {};
     if (stat(path.c_str(), &st) != 0)
-        throw std::runtime_error("infcore: не удалось stat artifact " + label + ": " + path);
+        throw std::runtime_error("infcore: could not stat artifact " + label + ": " + path);
     if (!S_ISREG(st.st_mode))
-        throw std::runtime_error("infcore: artifact не является regular file " + label + ": " + path);
+        throw std::runtime_error("infcore: artifact is not a regular file " + label + ": " + path);
     if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0)
-        throw std::runtime_error("infcore: artifact writable для group/other " + label + ": " + path);
+        throw std::runtime_error("infcore: artifact is group/other-writable " + label + ": " + path);
     if (size_bytes > 0 && static_cast<int64_t>(st.st_size) != size_bytes)
-        throw std::runtime_error("infcore: size mismatch для " + label + ": " + path);
+        throw std::runtime_error("infcore: size mismatch for " + label + ": " + path);
     if (!sha256.empty()) {
         const std::string got = sha256_file(path);
         if (got != sha256)
-            throw std::runtime_error("infcore: sha256 mismatch для " + label + ": " + path);
+            throw std::runtime_error("infcore: sha256 mismatch for " + label + ": " + path);
     }
 }
 
 // Строгий разбор dotted-quad IPv4: ровно 4 числовых октета 0..255, без лишних
-// символов. Хостнейм вида "127.0.0.1.evil.com" или "10.example.org" НЕ является
+// characters. A hostname like "127.0.0.1.evil.com" or "10.example.org" is NOT
 // IPv4 -> не пройдёт как локальный (закрывает обход по префиксу).
 static bool parse_ipv4(const std::string& h, unsigned o[4]) {
     unsigned vals[4];
@@ -150,8 +150,8 @@ static bool parse_ipv4(const std::string& h, unsigned o[4]) {
     return true;
 }
 
-// Разбор "10.0.0.0/8" или "192.168.1.5" (без маски = /32). Опирается на строгий
-// parse_ipv4, поэтому мусор вида "10.0.0.0/33" или "1.2.3.4.5/8" не проходит.
+// Parses "10.0.0.0/8" or "192.168.1.5" (no mask = /32). Built on the strict
+// parse_ipv4, so junk like "10.0.0.0/33" or "1.2.3.4.5/8" is rejected.
 bool parse_cidr_v4(const std::string& s, unsigned net[4], int& bits) {
     const auto slash = s.find('/');
     std::string ip = (slash == std::string::npos) ? s : s.substr(0, slash);
@@ -219,7 +219,7 @@ static bool is_local_host(const std::string& url) {
 
 GatewayConfig load_config(const std::string& path) {
     std::ifstream f(path);
-    if (!f) throw std::runtime_error("infcore: не удалось открыть конфиг: " + path);
+    if (!f) throw std::runtime_error("infcore: could not open config: " + path);
 
     std::stringstream ss;
     ss << f.rdbuf();
@@ -229,7 +229,7 @@ GatewayConfig load_config(const std::string& path) {
         j = json::parse(ss.str(), /*cb*/ nullptr, /*allow_exceptions*/ true,
                         /*ignore_comments*/ true);
     } catch (const std::exception& e) {
-        throw std::runtime_error(std::string("infcore: ошибка разбора конфига: ") + e.what());
+        throw std::runtime_error(std::string("infcore: config parse error: ") + e.what());
     }
 
     // Формальная валидация по встроенной JSON-Schema (fail-fast при старте).
@@ -237,7 +237,7 @@ GatewayConfig load_config(const std::string& path) {
         json schema = json::parse(kGatewaySchemaJson, nullptr, true, true);
         auto errs = json_schema_validate(j, schema);
         if (!errs.empty()) {
-            std::string msg = "infcore: конфиг не соответствует JSON-Schema:";
+            std::string msg = "infcore: config does not match the JSON-Schema:";
             for (const auto& e : errs) msg += "\n  - " + e;
             throw std::runtime_error(msg);
         }
@@ -262,7 +262,7 @@ GatewayConfig load_config(const std::string& path) {
                 // в client_ip=127.0.0.1 - такое надо ловить fail-fast.
                 unsigned net[4]; int bits = 0;
                 if (!parse_cidr_v4(cidr, net, bits))
-                    throw std::runtime_error("infcore: server.trusted_proxies: не IPv4/CIDR: " + cidr);
+                    throw std::runtime_error("infcore: server.trusted_proxies: not IPv4/CIDR: " + cidr);
                 cfg.trusted_proxies.push_back(cidr);
             }
         }
@@ -274,7 +274,7 @@ GatewayConfig load_config(const std::string& path) {
             for (const auto& k : s.at("api_keys")) {
                 std::string key = resolve_secret(k.get<std::string>());
                 if (weak_secret(key))
-                    throw std::runtime_error("infcore: слабый или заглушечный ключ в security.api_keys - задайте случайный ключ длиной не менее 24 символов (env:/file:)");
+                    throw std::runtime_error("infcore: weak or placeholder key in security.api_keys - use a random key of at least 24 characters (env:/file:)");
                 cfg.api_keys.push_back(std::move(key));
             }
         if (s.contains("principals")) {
@@ -284,10 +284,10 @@ GatewayConfig load_config(const std::string& path) {
                 ap.principal.subject = p.value("subject", std::string());
                 ap.principal.role    = p.value("role", std::string());
                 if (ap.api_key.empty())
-                    throw std::runtime_error("infcore: principal без api_key");
+                    throw std::runtime_error("infcore: principal without api_key");
                 if (weak_secret(ap.api_key))
-                    throw std::runtime_error("infcore: слабый или заглушечный ключ у principal '" +
-                        ap.principal.subject + "' - задайте случайный ключ длиной не менее 24 символов (env:/file:)");
+                    throw std::runtime_error("infcore: weak or placeholder key for principal '" +
+                        ap.principal.subject + "' - use a random key of at least 24 characters (env:/file:)");
                 cfg.principals.push_back(std::move(ap));
             }
         }
@@ -296,7 +296,7 @@ GatewayConfig load_config(const std::string& path) {
                 Role role;
                 role.name = r.value("name", std::string());
                 if (role.name.empty())
-                    throw std::runtime_error("infcore: role без name");
+                    throw std::runtime_error("infcore: role without name");
                 if (r.contains("allow_models"))
                     for (const auto& m : r.at("allow_models")) role.allow_models.push_back(m.get<std::string>());
                 if (r.contains("allow_endpoints"))
@@ -321,7 +321,7 @@ GatewayConfig load_config(const std::string& path) {
         cfg.metrics_enabled = o.value("metrics_enabled", cfg.metrics_enabled);
         cfg.metrics_path = o.value("metrics_path", cfg.metrics_path);
         if (cfg.metrics_path.empty() || cfg.metrics_path.front() != '/')
-            throw std::runtime_error("infcore: observability.metrics_path должен начинаться с '/'");
+            throw std::runtime_error("infcore: observability.metrics_path must start with '/'");
     }
 
     if (j.contains("runtime")) {
@@ -355,17 +355,17 @@ GatewayConfig load_config(const std::string& path) {
             e.n_ctx          = m.value("n_ctx", 8192);
             e.n_gpu_layers   = m.value("n_gpu_layers", 0);
             if (e.logical_name.empty())
-                throw std::runtime_error("infcore: model без logical_name");
+                throw std::runtime_error("infcore: model without logical_name");
             cfg.models.push_back(std::move(e));
         }
     }
 
     if (cfg.api_keys.empty() && cfg.principals.empty())
-        throw std::runtime_error("infcore: нет ни security.api_keys, ни security.principals — нужен хотя бы один ключ");
+        throw std::runtime_error("infcore: neither security.api_keys nor security.principals is set — at least one key is required");
     if (cfg.models.empty())
-        throw std::runtime_error("infcore: models пуст");
+        throw std::runtime_error("infcore: models is empty");
     if (cfg.audit_require && cfg.audit_sink == "none")
-        throw std::runtime_error("infcore: security.audit.require=true несовместим с sink=none");
+        throw std::runtime_error("infcore: security.audit.require=true is incompatible with sink=none");
 
     std::set<std::string> model_names;
     for (const auto& m : cfg.models) {
@@ -398,8 +398,8 @@ GatewayConfig load_config(const std::string& path) {
             bool found = false;
             for (const auto& r : cfg.roles) if (r.name == ap.principal.role) { found = true; break; }
             if (!found)
-                throw std::runtime_error("infcore: роль '" + ap.principal.role +
-                    "' principal'а '" + ap.principal.subject + "' не объявлена в security.roles");
+                throw std::runtime_error("infcore: role '" + ap.principal.role +
+                    "' of principal '" + ap.principal.subject + "' is not declared in security.roles");
         }
     }
 
@@ -410,7 +410,7 @@ GatewayConfig load_config(const std::string& path) {
     if (const char* p = std::getenv("INFCORE_PORT"); p && *p) {
         int v = std::atoi(p);
         if (v < 1 || v > 65535)
-            throw std::runtime_error("infcore: INFCORE_PORT вне диапазона 1..65535: " + std::string(p));
+            throw std::runtime_error("infcore: INFCORE_PORT out of range 1..65535: " + std::string(p));
         cfg.port = v;
     }
 
@@ -420,24 +420,24 @@ GatewayConfig load_config(const std::string& path) {
         if (!m.backend_url.empty()) {
             // Внешний бэкенд: при жёстком offline обязан быть локальным (не в интернет).
             if (cfg.enforce_no_egress && !is_local_host(m.backend_url))
-                throw std::runtime_error("infcore: enforce_no_egress: backend_url модели '" +
-                    m.logical_name + "' не локальный: " + m.backend_url);
+                throw std::runtime_error("infcore: enforce_no_egress: backend_url of model '" +
+                    m.logical_name + "' is not local: " + m.backend_url);
             continue;
         }
         // Управляемая модель (без backend_url) требует llama_server_bin и gguf_path.
         if (cfg.llama_server_bin.empty())
-            throw std::runtime_error("infcore: модель '" + m.logical_name +
-                "' без backend_url требует runtime.llama_server_bin");
+            throw std::runtime_error("infcore: model '" + m.logical_name +
+                "' without backend_url requires runtime.llama_server_bin");
         if (m.gguf_path.empty())
-            throw std::runtime_error("infcore: управляемая модель '" + m.logical_name +
-                "' требует gguf_path");
+            throw std::runtime_error("infcore: managed model '" + m.logical_name +
+                "' requires gguf_path");
         // Vision без проектора запустилась бы битой - ловим на старте.
         if (vlm && m.mmproj_path.empty())
-            throw std::runtime_error("infcore: модель '" + m.logical_name +
-                "' модальности vision требует mmproj_path");
+            throw std::runtime_error("infcore: model '" + m.logical_name +
+                "' of modality vision requires mmproj_path");
         if (rerank && m.n_ctx < 512)
-            throw std::runtime_error("infcore: модель '" + m.logical_name +
-                "' модальности rerank требует n_ctx >= 512");
+            throw std::runtime_error("infcore: model '" + m.logical_name +
+                "' of modality rerank requires n_ctx >= 512");
         validate_artifact_integrity(m.gguf_path, m.sha256, m.size_bytes,
                                     cfg.require_model_integrity,
                                     "model '" + m.logical_name + "'");

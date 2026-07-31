@@ -22,15 +22,15 @@ struct Opts {
 
 void usage() {
     std::printf(
-        "infcore-cli [--url URL] [--key KEY] <команда>\n"
-        "  health                 состояние gateway (/health, без авторизации)\n"
-        "  models                 доступные модели (/v1/models)\n"
-        "  admin-models           полный список со статусом (/admin/models)\n"
-        "  enable  <model>        включить модель\n"
-        "  disable <model>        выключить модель\n"
-        "  chat -m <model> [текст] чат (текст из аргумента или stdin)\n"
-        "\nключ: --key KEY, --key-file PATH, --key-stdin или env INFCORE_KEY\n"
-        "env: INFCORE_URL, INFCORE_KEY (флаги имеют приоритет)\n");
+        "infcore-cli [--url URL] [--key KEY] <command>\n"
+        "  health                 gateway health (/health, no auth)\n"
+        "  models                 available models (/v1/models)\n"
+        "  admin-models           full list with status (/admin/models)\n"
+        "  enable  <model>        enable a model\n"
+        "  disable <model>        disable a model\n"
+        "  chat -m <model> [text] chat (text from the argument or stdin)\n"
+        "\nkey: --key KEY, --key-file PATH, --key-stdin or env INFCORE_KEY\n"
+        "env: INFCORE_URL, INFCORE_KEY (flags take precedence)\n");
 }
 
 httplib::Headers auth(const Opts& o) {
@@ -46,14 +46,14 @@ json request(const Opts& o, const char* method, const std::string& path, const s
         (std::string(method) == "POST")
             ? cli.Post(path, auth(o), body, "application/json")
             : cli.Get(path, auth(o));
-    if (!r) { std::fprintf(stderr, "infcore-cli: нет связи с %s\n", o.url.c_str()); std::exit(2); }
+    if (!r) { std::fprintf(stderr, "infcore-cli: cannot reach %s\n", o.url.c_str()); std::exit(2); }
     if (r->status < 200 || r->status >= 300) {
-        std::fprintf(stderr, "infcore-cli: ошибка %d: %s\n", r->status, r->body.c_str());
+        std::fprintf(stderr, "infcore-cli: error %d: %s\n", r->status, r->body.c_str());
         std::exit(1);
     }
     json j = json::parse(r->body, nullptr, false);
     if (j.is_discarded()) {
-        std::fprintf(stderr, "infcore-cli: неожиданный ответ (не JSON): %s\n", r->body.c_str());
+        std::fprintf(stderr, "infcore-cli: unexpected response (not JSON): %s\n", r->body.c_str());
         std::exit(1);
     }
     return j;
@@ -66,14 +66,14 @@ std::string trim_secret(std::string s) {
 
 std::string read_file(const std::string& path) {
     std::ifstream f(path);
-    if (!f) { std::fprintf(stderr, "infcore-cli: не удалось прочитать key-file: %s\n", path.c_str()); std::exit(2); }
+    if (!f) { std::fprintf(stderr, "infcore-cli: could not read key-file: %s\n", path.c_str()); std::exit(2); }
     std::stringstream ss; ss << f.rdbuf();
     return trim_secret(ss.str());
 }
 
 int cmd_models(const Opts& o, bool admin) {
     json j = request(o, "GET", admin ? "/admin/models" : "/v1/models", "");
-    if (!j.contains("data")) { std::printf("(пусто)\n"); return 0; }
+    if (!j.contains("data")) { std::printf("(empty)\n"); return 0; }
     for (const auto& m : j.at("data")) {
         const std::string id = m.value("id", "?");
         const std::string modality = m.value("modality", "");
@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
             if (args[i] == "-m" && i + 1 < args.size()) model = args[++i];
             else { if (!text.empty()) text += " "; text += args[i]; }
         }
-        if (model.empty()) { std::fprintf(stderr, "infcore-cli: укажите модель: chat -m <model>\n"); return 1; }
+        if (model.empty()) { std::fprintf(stderr, "infcore-cli: specify a model: chat -m <model>\n"); return 1; }
         if (text.empty()) text = read_stdin();
         return cmd_chat(o, model, text);
     }

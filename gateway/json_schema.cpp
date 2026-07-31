@@ -40,7 +40,7 @@ void validate(const json& inst, const json& schema, const json& root,
     if (schema.contains("type")) {
         const std::string t = schema.at("type").get<std::string>();
         if (!type_matches(inst, t)) {
-            errs.push_back(P + ": ожидался тип '" + t + "'");
+            errs.push_back(P + ": expected type '" + t + "'");
             return;   // дальше проверять бессмысленно
         }
     }
@@ -48,28 +48,28 @@ void validate(const json& inst, const json& schema, const json& root,
     if (schema.contains("enum")) {
         bool ok = false;
         for (const auto& e : schema.at("enum")) if (e == inst) { ok = true; break; }
-        if (!ok) errs.push_back(P + ": значение вне списка enum");
+        if (!ok) errs.push_back(P + ": value not in enum");
     }
 
     if (inst.is_number()) {
         double x = inst.get<double>();
         if (schema.contains("minimum") && x < schema.at("minimum").get<double>())
-            errs.push_back(P + ": меньше minimum");
+            errs.push_back(P + ": below minimum");
         if (schema.contains("maximum") && x > schema.at("maximum").get<double>())
-            errs.push_back(P + ": больше maximum");
+            errs.push_back(P + ": above maximum");
     }
 
     if (inst.is_string() && schema.contains("pattern")) {
         try {
             std::regex re(schema.at("pattern").get<std::string>());
             if (!std::regex_search(inst.get<std::string>(), re))
-                errs.push_back(P + ": не соответствует pattern");
+                errs.push_back(P + ": does not match pattern");
         } catch (const std::exception&) { /* некорректный pattern в схеме - пропускаем */ }
     }
 
     if (inst.is_array()) {
         if (schema.contains("minItems") && inst.size() < schema.at("minItems").get<size_t>())
-            errs.push_back(P + ": элементов меньше minItems");
+            errs.push_back(P + ": fewer items than minItems");
         if (schema.contains("items")) {
             const json& isch = schema.at("items");
             for (size_t i = 0; i < inst.size(); ++i)
@@ -81,7 +81,7 @@ void validate(const json& inst, const json& schema, const json& root,
         if (schema.contains("required"))
             for (const auto& r : schema.at("required")) {
                 const std::string key = r.get<std::string>();
-                if (!inst.contains(key)) errs.push_back(P + ": отсутствует обязательное поле '" + key + "'");
+                if (!inst.contains(key)) errs.push_back(P + ": missing required property '" + key + "'");
             }
 
         const bool has_props = schema.contains("properties");
@@ -94,7 +94,7 @@ void validate(const json& inst, const json& schema, const json& root,
             if (has_props && schema.at("properties").contains(key)) {
                 validate(it.value(), schema.at("properties").at(key), root, path + "/" + key, errs);
             } else if (addl_false) {
-                errs.push_back(P + ": неизвестное поле '" + key + "'");
+                errs.push_back(P + ": unknown property '" + key + "'");
             }
         }
     }

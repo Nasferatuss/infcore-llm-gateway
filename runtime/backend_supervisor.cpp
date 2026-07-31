@@ -76,7 +76,7 @@ std::string resolve_executable(const std::string& bin) {
 BackendSupervisor::BackendSupervisor(Options opt)
     : opt_(std::move(opt)), api_key_(gen_token(opt_.backend_token_path)), next_port_(opt_.port_range_start) {
     if (api_key_.empty())
-        throw std::runtime_error("infcore: не удалось сгенерировать внутренний backend API key");
+        throw std::runtime_error("infcore: could not generate the internal backend API key");
     reaper_ = std::thread([this] { reaper_loop(); });
 }
 
@@ -139,12 +139,12 @@ bool BackendSupervisor::wait_health(int port) {
 // напрямую (в обход gateway/RBAC/audit) до них не достучаться.
 bool BackendSupervisor::spawn(const ModelEntry& e, int port, pid_t& out_pid, std::string& err) {
     if (opt_.llama_server_bin.empty()) {
-        err = "не задан runtime.llama_server_bin";
+        err = "runtime.llama_server_bin is not set";
         return false;
     }
     const std::string exec_path = resolve_executable(opt_.llama_server_bin);
     if (exec_path.empty()) {
-        err = "runtime.llama_server_bin не найден или не исполняем: " + opt_.llama_server_bin;
+        err = "runtime.llama_server_bin not found or not executable: " + opt_.llama_server_bin;
         return false;
     }
 
@@ -180,7 +180,7 @@ bool BackendSupervisor::spawn(const ModelEntry& e, int port, pid_t& out_pid, std
     envp.push_back(nullptr);
 
     pid_t pid = fork();
-    if (pid < 0) { err = "fork() не удался"; return false; }
+    if (pid < 0) { err = "fork() failed"; return false; }
     if (pid == 0) {
         // дочерний: новая группа процессов, чтобы сигналы не задевали gateway
         setpgid(0, 0);
@@ -286,7 +286,7 @@ std::string BackendSupervisor::ensure_ready(const ModelEntry& e, std::string& er
                     stop_backend(b, lock);        // -> Stopped, pid=-1, port=0
                     b.stop_requested = false;
                     b.cv.notify_all();
-                    err = "модель отключена во время старта";
+                    err = "model was disabled while starting";
                     return std::string();
                 }
                 if (ok) {
@@ -296,7 +296,7 @@ std::string BackendSupervisor::ensure_ready(const ModelEntry& e, std::string& er
                     b.fail_count = 0;
                     b.retry_after_ms = 0;
                 } else {
-                    if (serr.empty()) serr = "бэкенд не прошёл health-check за startup_timeout_ms";
+                    if (serr.empty()) serr = "backend did not pass health-check within startup_timeout_ms";
                     b.last_error = serr;
                     stop_backend(b, lock);   // сбрасывает pid/port, выставляет Stopped (mu_ отпущен на время kill)
                     b.fail_count++;

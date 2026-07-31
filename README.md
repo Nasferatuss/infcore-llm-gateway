@@ -1,5 +1,8 @@
 # infcore — an OpenAI-compatible gateway for local LLM inference
 
+[![CI](https://github.com/Nasferatuss/infcore-llm-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Nasferatuss/infcore-llm-gateway/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A production layer on top of [llama.cpp](https://github.com/ggml-org/llama.cpp):
 multi-model routing, lazy backend supervision, authn/RBAC, audit logging and
 Prometheus metrics — behind a single OpenAI-compatible API, fully offline.
@@ -143,5 +146,5 @@ Detailed docs are in Russian under `docs/`:
 | `DEPLOY.md` | deployment, Docker, systemd |
 | `DEPLOY_H100_PROD.md` | production H100: `sm_90` build, TLS, rotation, monitoring |
 | `RUNBOOK_H100_RU.md` | step-by-step server bring-up |
+| `TEST_PLAN_WSL_RU.md` | bring-up on a consumer GPU under WSL2 |
 | `COMPLIANCE.md` | licence attribution and provenance |
-| `STATUS.md` | what is done versus roadmap |

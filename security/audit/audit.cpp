@@ -59,8 +59,8 @@ void AuditLog::reopen_if_requested() {
         // ротации значило бы лечить хуже болезни. Ops видит счётчик и stderr.
         reopen_failures_.fetch_add(1, std::memory_order_relaxed);
         std::fprintf(stderr,
-            "infcore: audit: не удалось переоткрыть журнал '%s' (%s); продолжаем "
-            "писать в прежний файл — ротация де-факто не состоялась.\n",
+            "infcore: audit: could not reopen journal '%s' (%s); still writing to "
+            "the previous file — rotation did not actually happen.\n",
             path_.c_str(), std::strerror(errno));
         return;
     }
@@ -150,8 +150,8 @@ void AuditLog::writer_loop() {
             // Громко: инвариант «нет трафика без аудита» иначе деградировал бы молча.
             // Шлюз, увидев failed(), начнёт fail-closed (503) при audit.require=true.
             std::fprintf(stderr,
-                "infcore: КРИТИЧНО: сбой записи audit-журнала (%s); дальнейшие события "
-                "НЕ фиксируются. При audit.require=true шлюз перестаёт отдавать трафик.\n",
+                "infcore: CRITICAL: audit journal write failed (%s); further events are "
+                "NOT recorded. With audit.require=true the gateway stops serving traffic.\n",
                 std::strerror(werr));
         }
         cv_commit_.notify_all();

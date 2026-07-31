@@ -56,21 +56,23 @@ sudo apt install -y git build-essential cmake ninja-build python3 python3-pip py
 
 ## 3. Забрать репозиторий
 
+infcore собирается внутри дерева llama.cpp как подкаталог `infcore/`:
+
 ```bash
 cd ~
-git clone https://github.com/Nasferatuss/llama.cpp.git
-cd llama.cpp
-git checkout infcore
-git pull origin infcore
+git clone --depth 1 https://github.com/ggml-org/llama.cpp engine-src
+git clone --depth 1 https://github.com/Nasferatuss/infcore-llm-gateway \
+    engine-src/infcore
+cd engine-src
 ```
 
-Проверить актуальный коммит:
+Проверить, какая ревизия слоя infcore проверяется:
 
 ```bash
-git rev-parse --short HEAD
+git -C infcore rev-parse --short HEAD
 ```
 
-Ожидается `bf337ef5a` или новее.
+Пиннинг апстрима (тег движка, под который слой собран) — в `infcore/sbom.cdx.json`.
 
 ## 4. Положить модель в WSL
 

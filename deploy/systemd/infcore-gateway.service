@@ -1,4 +1,4 @@
-# infcore gateway - systemd unit для offline РФ-контура.
+# infcore gateway - systemd unit для offline-контура.
 # ПРЕДВАРИТЕЛЬНО (один раз, от root):
 #   useradd -r -s /usr/sbin/nologin infcore          # сервисный пользователь
 #   install -d -o infcore -g infcore /opt/infcore/bin /opt/infcore/config

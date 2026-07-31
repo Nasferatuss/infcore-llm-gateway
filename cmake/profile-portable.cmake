@@ -1,5 +1,5 @@
-# infcore — профиль сборки под РФ-контур (cache-init).
-# Применяется так:  cmake -S infcore -B build -C infcore/cmake/profile-rf.cmake
+# infcore — портируемый профиль сборки для изолированного контура (cache-init).
+# Применяется так:  cmake -S infcore -B build -C infcore/cmake/profile-portable.cmake
 # Задаёт флаги движка ДО конфигурации llama.cpp. Сами файлы апстрима не меняются.
 
 # --- Бэкенды ggml: оставляем cpu (всегда) + cuda + vulkan ---------------------

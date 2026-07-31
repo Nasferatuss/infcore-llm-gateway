@@ -1,4 +1,4 @@
-# infcore - локальный стек offline-контура. Образы из внутреннего реестра.
+# infcore - локальный стек offline-контура. В бою образы берутся из реестра контура.
 #
 # ТОПОЛОГИЯ СЕТЕЙ (важно, здесь легко сделать неработающий или дырявый стек):
 #
@@ -34,9 +34,9 @@
 #      прокси в audit-журнале у КАЖДОЙ записи будет client_ip самого прокси.
 services:
   gateway:
-    image: registry.internal/infcore/gateway:0.1.0
+    image: infcore/gateway:0.1.0
     build:
-      context: ../../..          # корень форка
+      context: ../../..          # корень дерева движка
       dockerfile: infcore/deploy/docker/Dockerfile
     restart: unless-stopped                        # упавший контейнер сам поднимается
     volumes:
@@ -84,7 +84,7 @@ services:
   # модели и повторную проверку sha256 - десятки секунд простоя на крупной модели).
   # Сертификат - от ВНУТРЕННЕГО CA: ACME/Let's Encrypt в offline-контуре невозможен.
   angie:
-    image: registry.internal/angie/angie:latest
+    image: docker.angie.software/angie:latest
     depends_on: [gateway]
     restart: unless-stopped
     volumes:
@@ -112,7 +112,7 @@ services:
   # Скрейпит gateway:8080/metrics ВНУТРИ сети internal. Наружу /metrics не выпускаем:
   # в самом шлюзе он отдаётся без авторизации (рассчитан на loopback).
   victoriametrics:
-    image: registry.internal/victoriametrics/victoria-metrics:latest
+    image: victoriametrics/victoria-metrics:latest
     depends_on: [gateway]
     restart: unless-stopped
     command:

@@ -1,12 +1,12 @@
 # Тексты лицензий третьих сторон
 
 Полные тексты лицензий включённых open-source компонентов. Тексты извлечены
-непосредственно из исходных файлов компонентов в дереве форка (`./LICENSE`,
+непосредственно из исходных файлов компонентов в дереве движка (`./LICENSE`,
 `./vendor/`). Машиночитаемая опись — в `../sbom.cdx.json` (CycloneDX).
 
 | Компонент | SPDX-идентификатор | Файл | Версия | Источник текста |
 |-----------|--------------------|------|--------|-----------------|
-| llama.cpp / ggml (ggml поставляется вместе с llama.cpp) | MIT | [ggml-llama.cpp.txt](ggml-llama.cpp.txt) | e8ecce5 | `./LICENSE` (корень форка) |
+| llama.cpp / ggml (ggml поставляется вместе с llama.cpp) | MIT | [ggml-llama.cpp.txt](ggml-llama.cpp.txt) | e8ecce5 | `./LICENSE` (корень дерева движка) |
 | nlohmann/json | MIT | [nlohmann-json.txt](nlohmann-json.txt) | 3.12.0 | `vendor/nlohmann/json.hpp` (SPDX-заголовок) |
 | cpp-httplib | MIT | [cpp-httplib.txt](cpp-httplib.txt) | 0.48.0 | `vendor/cpp-httplib/LICENSE` |
 | stb (stb_image) | MIT OR Unlicense | [stb.txt](stb.txt) | 2.30 | конец `vendor/stb/stb_image.h` |

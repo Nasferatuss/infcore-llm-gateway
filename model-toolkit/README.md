@@ -11,7 +11,7 @@
 
 ## Использование
 ```sh
-# каталог сборки с бинарями (по умолчанию ./build/bin от корня форка)
+# каталог сборки с бинарями (по умолчанию ./build/bin от корня дерева движка)
 export INFCORE_BUILD=/path/to/build
 
 infcore/model-toolkit/model-toolkit.sh quantize  model-f16.gguf  model-Q4_K_M.gguf  Q4_K_M

@@ -21,7 +21,7 @@
 Профиль сборки фиксирует состав и бэкенды (CUDA+Vulkan вкл., лишнее выкл.):
 
 ```sh
-cmake -S infcore -B build -C infcore/cmake/profile-rf.cmake
+cmake -S infcore -B build -C infcore/cmake/profile-portable.cmake
 cmake --build build -j"$(nproc)"
 # артефакты: build/bin/{infcore_gateway,llama-server,infcore-cli}
 ```
@@ -32,8 +32,8 @@ runtime не зависел от забытых `libllama.so`/`libggml*.so` ря
 Требования стадии сборки: CMake >= 3.21, C++17-компилятор, CUDA toolkit и/или
 Vulkan SDK из внутреннего зеркала пакетов. GPU на стадии сборки не нужен.
 
-Образ Docker: `infcore/deploy/docker/Dockerfile` (контекст = корень форка).
-Базовые образы - из внутреннего реестра (Astra/РЕД ОС).
+Образ Docker: `infcore/deploy/docker/Dockerfile` (контекст = корень дерева движка).
+Базовые образы собираются заранее из скелетов: `infcore/deploy/docker/base/`.
 
 ### GPU в рантайме
 Профиль по умолчанию собирает `llama-server` под CUDA+Vulkan, поэтому в рантайме нужны:
@@ -48,7 +48,7 @@ Base-образ рантайма ОБЯЗАН содержать эти библ
 
 Для **CPU-only** контура пересоберите без GPU. ВАЖНО: при встраивании через
 `add_subdirectory` `llama-server` по умолчанию НЕ собирается — нужно явно включить
-сервер и инструменты (профиль `profile-rf.cmake` это делает, «голая» команда — нет):
+сервер и инструменты (профиль `profile-portable.cmake` это делает, «голая» команда — нет):
 ```sh
 cmake -S infcore -B build -DGGML_CUDA=OFF -DGGML_VULKAN=OFF \
       -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_TOOLS=ON \
@@ -58,7 +58,7 @@ cmake --build build -j"$(nproc)"
 Без `-DLLAMA_BUILD_SERVER=ON` соберётся только `infcore_gateway`, а `llama-server`
 не будет — шлюз стартует, но каждый запрос к управляемой модели даст 502.
 
-> Примечание: `cmake -S .` (конфигурация КОРНЯ форка, не `infcore/`) требует
+> Примечание: `cmake -S .` (конфигурация КОРНЯ дерева движка, не `infcore/`) требует
 > `-DLLAMA_BUILD_APP=OFF` — каталог `app/` удалён при compliance-cleanup, а апстрим
 > включает его при standalone-сборке. Штатные пути (`-S infcore` / профиль) не задеты.
 

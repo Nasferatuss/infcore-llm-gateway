@@ -1,12 +1,12 @@
 # infcore — профиль сборки под сервер с NVIDIA H100 (cache-init).
 # Применяется так:  cmake -S infcore -B build -C infcore/cmake/profile-h100.cmake
 #
-# Отличия от profile-rf.cmake (общий парк GPU):
+# Отличия от profile-portable.cmake (общий парк GPU):
 #   - только CUDA sm_90 вместо "75;80;86;89;90" -> сборка кратно быстрее, бинарь
 #     и образ меньше. Профиль под ОДНОРОДНЫЙ парк H100;
 #   - Vulkan выключен: на выделенном CUDA-сервере он лишний код и лишняя
 #     зависимость на Vulkan SDK в base-образе.
-# Если парк разнородный (H100 + что-то ещё) - берите profile-rf.cmake.
+# Если парк разнородный (H100 + что-то ещё) - берите profile-portable.cmake.
 
 # --- Бэкенды ggml -------------------------------------------------------------
 set(GGML_CUDA      ON  CACHE BOOL "" FORCE)

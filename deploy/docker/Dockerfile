@@ -1,15 +1,15 @@
-# infcore — образ для offline РФ-контура. Контекст сборки = КОРЕНЬ форка.
+# infcore — образ для offline-контура. Контекст сборки = КОРЕНЬ дерева движка.
 # Интернет допустим ТОЛЬКО на стадии build; рантайм — строго offline.
-# Базовые образы — из внутреннего реестра (Astra Linux / РЕД ОС / ALT).
-# Рецепт/состав этих base-образов: infcore/deploy/docker/base/ (README + скелеты).
+# Базовые образы не публичные: их собирают один раз из скелетов рядом и
+# держат в реестре контура. Рецепты: infcore/deploy/docker/base/ (README + скелеты).
 
 # --- build stage ---
-ARG BASE_BUILD=registry.internal/astra/base-devel:1.7
+ARG BASE_BUILD=infcore/base-devel:1.7
 FROM ${BASE_BUILD} AS build
 WORKDIR /src
 COPY . /src
 # CUDA-toolkit / Vulkan SDK — из внутреннего зеркала пакетов.
-RUN cmake -S infcore -B build -C infcore/cmake/profile-rf.cmake \
+RUN cmake -S infcore -B build -C infcore/cmake/profile-portable.cmake \
  && cmake --build build -j"$(nproc)"
 
 # --- runtime stage (offline) ---
@@ -18,7 +18,7 @@ RUN cmake -S infcore -B build -C infcore/cmake/profile-rf.cmake \
 # иначе llama-server не стартует. Драйвер NVIDIA пробрасывается nvidia-container-toolkit;
 # CUDA/Vulkan runtime ставится из внутреннего зеркала в base-образ. Для CPU-only контура
 # соберите с -DGGML_CUDA=OFF -DGGML_VULKAN=OFF (см. DEPLOY.md, раздел GPU).
-ARG BASE_RUNTIME=registry.internal/astra/base:1.7
+ARG BASE_RUNTIME=infcore/base-runtime:1.7
 FROM ${BASE_RUNTIME}
 WORKDIR /opt/infcore
 # В рантайм только нужные бинари (gateway, cli, llama-server); прочие tools апстрима

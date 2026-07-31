@@ -1,8 +1,9 @@
-# СКЕЛЕТ runtime-образа infcore (registry.internal/astra/base). Строго offline в бою.
+# СКЕЛЕТ runtime-образа infcore (тег: infcore/base-runtime:1.7). Строго offline в бою.
 # ТОЛЬКО рантайм-библиотеки, без toolchain/SDK (минимальный attack surface).
-# Имена пакетов - под репозиторий вашей ОС (пример - Astra/Debian-подобная).
+# Имена пакетов - под репозиторий вашей ОС (пример - Debian-подобная).
 
-FROM registry.internal/astra/base:1.7
+# Как и в base-devel: публичный Debian, чтобы скелет собирался как есть.
+FROM debian:12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libgomp1 libstdc++6 \

@@ -28,9 +28,9 @@ cuobjdump build/bin/llama-server | grep -oE 'arch = sm_[0-9]+' | sort -u
 # ожидаем: arch = sm_90
 ```
 
-`profile-h100.cmake` отличается от `profile-rf.cmake` только тем, что собирает
+`profile-h100.cmake` отличается от `profile-portable.cmake` только тем, что собирает
 одну архитектуру (`90` вместо `75;80;86;89;90`) и выключает Vulkan. Если парк GPU
-разнородный — берите `profile-rf.cmake`, он покрывает и H100.
+разнородный — берите `profile-portable.cmake`, он покрывает и H100.
 
 ### n_gpu_layers на H100
 

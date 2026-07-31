@@ -106,7 +106,7 @@ Config is validated against `config/schema/gateway.schema.json` at startup —
 an invalid config fails fast rather than half-starting.
 
 Build profiles: `profile-cpu.cmake` (no GPU), `profile-h100.cmake` (`sm_90`),
-`profile-rf.cmake` (cpu + cuda + vulkan).
+`profile-portable.cmake` (cpu + cuda + vulkan).
 
 ## Testing
 

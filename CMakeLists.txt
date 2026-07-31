@@ -9,10 +9,10 @@ find_package(OpenSSL REQUIRED)
 # -----------------------------------------------------------------------------
 # Встраиваем движок llama.cpp (родительский каталог) БЕЗ изменений его файлов.
 # llama.cpp штатно поддерживает использование через add_subdirectory.
-# Флаги бэкендов/состава задаются профилем: cmake -C infcore/cmake/profile-rf.cmake
+# Флаги бэкендов/состава задаются профилем: cmake -C infcore/cmake/profile-portable.cmake
 # -----------------------------------------------------------------------------
 set(INFCORE_LLAMA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH
-    "Корень дерева llama.cpp (форк)")
+    "Корень дерева llama.cpp")
 
 # При встраивании через add_subdirectory LLAMA_STANDALONE=OFF, поэтому
 # common/server по умолчанию НЕ собираются. Нам они нужны (gateway линкует

@@ -1,183 +1,187 @@
-# infcore — прод-развёртывание на сервере с H100
+# infcore — production deployment on an H100 server
 
-Дополнение к [DEPLOY.md](DEPLOY.md): сборка под H100, TLS, ротация журнала,
-мониторинг. Общие вещи (состав, модели, порты, дымовой тест) — там.
+Companion to [DEPLOY.md](DEPLOY.md): the H100 build, TLS, log rotation,
+monitoring. The shared material (components, models, ports, smoke test) lives there.
 
-> Нужна копируемая пошаговая последовательность «с нуля до HTTPS» —
-> [RUNBOOK_H100_RU.md](RUNBOOK_H100_RU.md). Здесь — **почему** так, там — **что набирать**.
+> Need a copy-paste, step-by-step sequence from bare server to HTTPS —
+> [RUNBOOK_H100.md](RUNBOOK_H100.md). This document is the **why**; that one is
+> the **what to type**.
 
 ---
 
-## 1. Сборка под H100
+## 1. Building for the H100
 
-**H100 — это Hopper, `sm_90`.** Не `sm_89`.
+**The H100 is Hopper, `sm_90`.** Not `sm_89`.
 
 ```bash
 cmake -S infcore -B build -C infcore/cmake/profile-h100.cmake
 cmake --build build -j"$(nproc)"
 ```
 
-> ⚠️ **Не копируйте команду сборки из [TEST_PLAN_WSL_RU.md](TEST_PLAN_WSL_RU.md).**
-> Тест-план писался под RTX 4070 Laptop и задаёт `-DCMAKE_CUDA_ARCHITECTURES=89`
-> (Ada). Собранный так бинарь **не несёт CUDA-ядер для H100**.
+> ⚠️ **Do not copy the build command from [TEST_PLAN_WSL.md](TEST_PLAN_WSL.md).**
+> That test plan was written for an RTX 4070 Laptop and sets
+> `-DCMAKE_CUDA_ARCHITECTURES=89` (Ada). A binary built that way **carries no
+> CUDA kernels for the H100**.
 
-Проверить, что внутри действительно `sm_90`:
+Verify that the binary really contains `sm_90`:
 
 ```bash
 cuobjdump build/bin/llama-server | grep -oE 'arch = sm_[0-9]+' | sort -u
-# ожидаем: arch = sm_90
+# expected: arch = sm_90
 ```
 
-`profile-h100.cmake` отличается от `profile-portable.cmake` только тем, что собирает
-одну архитектуру (`90` вместо `75;80;86;89;90`) и выключает Vulkan. Если парк GPU
-разнородный — берите `profile-portable.cmake`, он покрывает и H100.
+`profile-h100.cmake` differs from `profile-portable.cmake` only in building a
+single architecture (`90` instead of `75;80;86;89;90`) and turning Vulkan off.
+If your GPU fleet is mixed, use `profile-portable.cmake` — it covers the H100 too.
 
-### n_gpu_layers на H100
+### n_gpu_layers on an H100
 
-Модель на 25 GiB целиком помещается в 80 GiB VRAM, поэтому:
+A 25 GiB model fits entirely into 80 GiB of VRAM, so:
 
 ```json
 { "n_gpu_layers": -1 }
 ```
 
-`-1` = не передавать флаг бэкенду, llama.cpp сам подгонит offload под свободную
-VRAM. Любое явное значение эту авто-подгонку **отключает**
-(`n_gpu_layers already set by user ... abort`), а на GPU, куда модель не влезает
-целиком, ручной подбор проигрывает авто-режиму почти вдвое.
+`-1` = do not pass the flag to the backend; llama.cpp fits the offload to free
+VRAM by itself. Any explicit value **disables** that auto-fit
+(`n_gpu_layers already set by user ... abort`), and on a GPU where the model
+does not fit entirely, manual tuning loses to the auto mode almost two-fold.
 
 ---
 
 ## 2. TLS
 
-TLS терминируется на reverse-proxy (Angie/nginx), а не в шлюзе:
+TLS is terminated at the reverse proxy (Angie/nginx), not in the gateway:
 
-* перевыпуск сертификата = `reload` прокси, а не рестарт шлюза. Рестарт означает
-  выгрузку модели и повторную проверку sha256 — на 25 GiB это десятки секунд простоя;
-* TLS-стек не попадает в security-critical путь самого шлюза;
-* шлюз остаётся HTTP на loopback и наружу не публикуется вовсе.
+* certificate renewal = proxy `reload`, not a gateway restart. A restart means
+  unloading the model and re-verifying its sha256 — tens of seconds of downtime
+  on a 25 GiB model;
+* the TLS stack stays out of the gateway's own security-critical path;
+* the gateway remains plain HTTP on loopback and is never published externally.
 
-Конфиг: [`deploy/angie/infcore.conf`](../deploy/angie/infcore.conf) →
-`/etc/angie/http.d/`. Сертификат — от **внутреннего CA**: ACME/Let's Encrypt в
-offline-контуре невозможен.
+Config: [`deploy/angie/infcore.conf`](../deploy/angie/infcore.conf) →
+`/etc/angie/http.d/`. The certificate comes from an **internal CA**:
+ACME/Let's Encrypt is impossible in an offline enclave.
 
 ```bash
 angie -t && systemctl reload angie
 ```
 
-### ⚠️ trusted_proxies — обязательно
+### ⚠️ trusted_proxies — mandatory
 
-Шлюз пишет в аудит IP пира соединения. За прокси пиром всегда оказывается **сам
-прокси**, поэтому без настройки у **каждой** записи журнала будет `client_ip`
-прокси, и аудит потеряет измерение «откуда»:
+The gateway records the connection peer's IP in the audit log. Behind a proxy
+the peer is always **the proxy itself**, so without this setting **every** audit
+record carries the proxy's `client_ip`, and the audit trail loses its "from
+where" dimension:
 
 ```json
 "server": { "trusted_proxies": ["10.0.0.0/8"] }
 ```
 
-Только для запросов с этих адресов `client_ip` берётся из `X-Real-IP` /
-`X-Forwarded-For`. Остальным заголовкам не верят — иначе любой клиент подделает
-себе IP в аудите одним лишним заголовком. Пустой список (по умолчанию) = не
-доверять никому.
+Only for requests from these addresses is `client_ip` taken from `X-Real-IP` /
+`X-Forwarded-For`. Everyone else's headers are not trusted — otherwise any
+client could forge its IP in the audit log with one extra header. An empty list
+(the default) = trust no one.
 
-Берётся **правый** элемент `X-Forwarded-For`: nginx/Angie дописывают своего пира
-справа, а левые элементы пришли от клиента и подделываются тривиально.
+The **rightmost** element of `X-Forwarded-For` is used: nginx/Angie append their
+peer on the right, while the left-hand elements came from the client and are
+trivially forged.
 
 ---
 
-## 3. Ротация audit-журнала
+## 3. Audit log rotation
 
-Конфиг: [`deploy/logrotate/infcore`](../deploy/logrotate/infcore) → `/etc/logrotate.d/infcore`.
+Config: [`deploy/logrotate/infcore`](../deploy/logrotate/infcore) → `/etc/logrotate.d/infcore`.
 
-Шлюз держит fd журнала открытым всю жизнь процесса, поэтому режим ротации
-принципиален:
+The gateway holds the log fd open for the lifetime of the process, so the
+rotation mode matters:
 
-| Режим | Итог |
+| Mode | Outcome |
 |---|---|
-| `copytruncate` | ❌ события теряются между copy и truncate |
-| `create` без сигнала | ❌ шлюз пишет в переименованный файл, новый пустой — аудит молча утекает в архив |
-| **`create` + SIGHUP** | ✅ единственный вариант без потерь |
+| `copytruncate` | ❌ events are lost between the copy and the truncate |
+| `create` without a signal | ❌ the gateway keeps writing to the renamed file; the new one stays empty — the audit trail silently drains into the archive |
+| **`create` + SIGHUP** | ✅ the only loss-free option |
 
-По SIGHUP шлюз переоткрывает журнал по прежнему пути. Сигнал приходит из
-`postrotate` через `systemctl reload` → `ExecReload=/bin/kill -HUP $MAINPID`.
+On SIGHUP the gateway reopens the log at its original path. The signal arrives
+from `postrotate` via `systemctl reload` → `ExecReload=/bin/kill -HUP $MAINPID`.
 
-Переоткрытие происходит перед записью следующего события: если событий нет,
-терять нечего.
+The reopen happens before the next event is written: if there are no events,
+there is nothing to lose.
 
-Проверить, что ротация действительно доезжает:
+Verify that rotation actually lands:
 
 ```bash
 curl -s localhost:8080/metrics | grep audit_reopen
-# infcore_gateway_audit_reopens_total         должен расти
-# infcore_gateway_audit_reopen_failures_total должен быть 0
+# infcore_gateway_audit_reopens_total         must be growing
+# infcore_gateway_audit_reopen_failures_total must be 0
 ```
 
-> Без ротации журнал растёт до упора в лимит размера файла, после чего аудит
-> уходит в **fail-closed** и шлюз перестаёт отдавать трафик. Это вопрос времени,
-> а не «если».
+> Without rotation the log grows until it hits the file-size limit, at which
+> point audit goes **fail-closed** and the gateway stops serving traffic. That
+> is a matter of "when", not "if".
 
 ---
 
-## 4. Ротация API-ключей
+## 4. API key rotation
 
-Ключи задаются через `env:VAR` и читаются **на старте**. Горячей перечитки
-конфига нет: `SIGHUP` переоткрывает только журнал.
+Keys are supplied via `env:VAR` and read **at startup**. There is no hot config
+reload: `SIGHUP` only reopens the log.
 
-Процедура без простоя (два ключа одновременно):
+Zero-downtime procedure (two keys active at once):
 
-1. добавить новый principal с новым ключом в конфиг, старый оставить;
-2. `systemctl restart infcore-gateway` (простой = загрузка модели + sha256);
-3. перевести клиентов на новый ключ; следить за
-   `infcore_gateway_errors_total{type="unauthorized"}` — всплеск означает, что
-   кто-то остался на старом;
-4. когда всплесков нет — удалить старый principal и снова `restart`.
+1. add a new principal with the new key to the config, keeping the old one;
+2. `systemctl restart infcore-gateway` (the downtime = model load + sha256);
+3. move clients to the new key; watch
+   `infcore_gateway_errors_total{type="unauthorized"}` — a spike means someone
+   is still on the old one;
+4. once there are no spikes — remove the old principal and `restart` again.
 
-Кто именно ходил каким ключом, видно в аудите по `subject`.
+Who used which key is visible in the audit log via `subject`.
 
 ---
 
-## 5. Мониторинг
+## 5. Monitoring
 
 * scrape: [`deploy/monitoring/scrape.yml`](../deploy/monitoring/scrape.yml)
-* алерты: [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml)
+* alerts: [`deploy/monitoring/alerts.yml`](../deploy/monitoring/alerts.yml)
 
-> ⚠️ `/metrics` в шлюзе отдаётся **без авторизации** (он рассчитан на loopback).
-> Наружу выпускать нельзя: счётчики ошибок и endpoint'ов — операционная разведка.
-> В `angie/infcore.conf` на `/metrics` стоит allow-список; поправьте под свою сеть.
+> ⚠️ The gateway serves `/metrics` **without authorization** (it is designed for
+> loopback). Never expose it externally: error and endpoint counters are
+> operational intelligence. `angie/infcore.conf` puts an allow-list on
+> `/metrics`; adjust it to your network.
 
-Что снимается:
+What is scraped:
 
-| Метрика | Зачем |
+| Metric | Why |
 |---|---|
-| `requests_total{endpoint,decision}` | трафик и решения политики |
-| `request_duration_seconds` (histogram) | p95/p99; деградация под нагрузкой |
-| `audit_failed` (gauge) | **1 = шлюз режет весь трафик fail-closed** |
-| `audit_reopens_total` / `audit_reopen_failures_total` | работает ли ротация |
-| `models_configured`, `backends_loaded` (gauge) | поднялся ли бэкенд |
-| `errors_total{type}` | 401, backend_*, rate_limited и пр. |
+| `requests_total{endpoint,decision}` | traffic and policy decisions |
+| `request_duration_seconds` (histogram) | p95/p99; degradation under load |
+| `audit_failed` (gauge) | **1 = the gateway is cutting all traffic fail-closed** |
+| `audit_reopens_total` / `audit_reopen_failures_total` | whether rotation works |
+| `models_configured`, `backends_loaded` (gauge) | whether the backend came up |
+| `errors_total{type}` | 401, backend_*, rate_limited, etc. |
 
-**Пороги в `alerts.yml` требуют калибровки под ваше железо.** Порог p95 = 30 с
-осмыслен для крупной модели с частичным offload; на H100 с моделью целиком в VRAM
-он должен быть в разы ниже. Снимите базовую линию:
+**The thresholds in `alerts.yml` need calibrating to your hardware.** A p95
+threshold of 30 s makes sense for a large model with partial offload; on an H100
+with the model fully in VRAM it should be several times lower. Take a baseline:
 
 ```bash
 python3 infcore/tests/load/loadtest.py --url http://127.0.0.1:8080 \
-    --key-file admin.key --model <модель> --concurrency 8 --requests 32
+    --key-file admin.key --model <model> --concurrency 8 --requests 32
 ```
 
-и правьте пороги, а не отключайте алерты.
+and adjust the thresholds — do not disable the alerts.
 
 ---
 
-## 6. Чек-лист перед боем
+## 6. Pre-production checklist
 
-- [ ] `cuobjdump` показывает `arch = sm_90`
-- [ ] `n_gpu_layers: -1`; после первого запроса `nvidia-smi` показывает модель в VRAM
-- [ ] `server.trusted_proxies` заполнен → в аудите реальные IP клиентов, а не прокси
-- [ ] `angie -t` проходит; по HTTP идёт редирект на HTTPS; сертификат от внутреннего CA
-- [ ] `/metrics` снаружи **не** доступен, изнутри сети мониторинга — доступен
-- [ ] `logrotate -d /etc/logrotate.d/infcore` без ошибок; после `-f`
-      `audit_reopens_total` вырос, `audit_reopen_failures_total` = 0
-- [ ] `require_model_integrity: true`, sha256 и size_bytes проставлены;
-      проверено негативно (битый sha256 → шлюз не стартует)
-- [ ] нагрузочный прогон снял базовую линию, пороги алертов откалиброваны
-- [ ] алерты доезжают до дежурного (проверить `InfcoreAuditFailed` — это простой)
+- [ ] `cuobjdump` shows `arch = sm_90`
+- [ ] `n_gpu_layers: -1`; after the first request `nvidia-smi` shows the model in VRAM
+- [ ] `server.trusted_proxies` is populated → the audit log shows real client IPs, not the proxy
+- [ ] `angie -t` passes; HTTP redirects to HTTPS; certificate is from the internal CA
+- [ ] `/metrics` is **not** reachable externally, and is reachable from the monitoring network
+- [ ] `require_model_integrity: true`, sha256 and size_bytes are set;
+      negatively tested (corrupt sha256 → the gateway refuses to start)
+- [ ] a load run has produced a baseline; alert thresholds are calibrated
+- [ ] alerts reach the on-call engineer (test `InfcoreAuditFailed` — that one is an outage)

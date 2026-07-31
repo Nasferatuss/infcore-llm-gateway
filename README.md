@@ -138,13 +138,14 @@ bundled dependency are in [NOTICE](NOTICE), `THIRD_PARTY_LICENSES/` and
 
 ## Documentation
 
-Detailed docs are in Russian under `docs/`:
+Detailed docs live under `docs/` (`ARCHITECTURE.md`, `DEPLOY.md` and
+`COMPLIANCE.md` are in Russian for now):
 
 | File | Contents |
 |---|---|
 | `ARCHITECTURE.md` | layers, process topology, request flow, offline invariants |
 | `DEPLOY.md` | deployment, Docker, systemd |
 | `DEPLOY_H100_PROD.md` | production H100: `sm_90` build, TLS, rotation, monitoring |
-| `RUNBOOK_H100_RU.md` | step-by-step server bring-up |
-| `TEST_PLAN_WSL_RU.md` | bring-up on a consumer GPU under WSL2 |
+| `RUNBOOK_H100.md` | step-by-step server bring-up |
+| `TEST_PLAN_WSL.md` | bring-up on a consumer GPU under WSL2 |
 | `COMPLIANCE.md` | licence attribution and provenance |

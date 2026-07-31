@@ -1,62 +1,63 @@
-# Тестирование infcore на потребительской GPU под WSL2
+# Testing infcore on a consumer GPU under WSL2
 
-Цель: проверить `infcore_gateway` с локальной Qwen 3.5 GGUF-моделью на обычном
-ноутбуке с дискретной NVIDIA. Референсная конфигурация, на которой план
-прогонялся: Core i7-13700HX, 64 GB RAM, RTX 4070 8 GB, Windows 11 Pro.
+Goal: verify `infcore_gateway` with a local Qwen 3.5 GGUF model on an ordinary
+laptop with a discrete NVIDIA GPU. Reference configuration this plan was run on:
+Core i7-13700HX, 64 GB RAM, RTX 4070 8 GB, Windows 11 Pro.
 
-Для `infcore_gateway` основной сценарий теста — WSL2 Ubuntu. Windows остаётся хостом
-с NVIDIA-драйвером и GPU, а gateway/backend запускаются внутри Linux-среды WSL2.
+The primary test scenario for `infcore_gateway` is WSL2 Ubuntu. Windows stays
+the host with the NVIDIA driver and the GPU, while the gateway/backend run
+inside the WSL2 Linux environment.
 
-## 0. Что понадобится
+## 0. What you need
 
-На Windows:
+On Windows:
 
-- свежий NVIDIA driver;
-- WSL2 Ubuntu 22.04 или 24.04;
-- локальная модель `.gguf`, например `C:\Models\qwen....gguf`.
+- a recent NVIDIA driver;
+- WSL2 Ubuntu 22.04 or 24.04;
+- a local `.gguf` model, e.g. `C:\Models\qwen....gguf`.
 
-В WSL:
+In WSL:
 
 - `git`, `cmake`, `ninja`, `g++`, `python3`, `pytest`, `openssl`, `libssl-dev`;
-- CUDA Toolkit внутри WSL, чтобы был доступен `nvcc`.
+- the CUDA Toolkit inside WSL, so that `nvcc` is available.
 
-## 1. Установить и проверить WSL2
+## 1. Install and verify WSL2
 
-PowerShell от администратора:
+PowerShell as administrator:
 
 ```powershell
 wsl --install -d Ubuntu-24.04
 wsl --set-default-version 2
 ```
 
-Перейти в Ubuntu/WSL и проверить GPU:
+Switch into Ubuntu/WSL and check the GPU:
 
 ```bash
 nvidia-smi
 ```
 
-Если `nvidia-smi` не работает, сначала обновить NVIDIA driver на Windows.
-Без этого CUDA-тесты не имеют смысла.
+If `nvidia-smi` does not work, update the NVIDIA driver on Windows first.
+Without it the CUDA tests are meaningless.
 
-Проверить CUDA compiler:
+Check the CUDA compiler:
 
 ```bash
 nvcc --version
 ```
 
-Если `nvcc` не найден, поставить CUDA Toolkit для WSL/Linux и снова проверить
-`nvcc --version`.
+If `nvcc` is not found, install the CUDA Toolkit for WSL/Linux and check
+`nvcc --version` again.
 
-## 2. Подготовить окружение в WSL
+## 2. Prepare the WSL environment
 
 ```bash
 sudo apt update
 sudo apt install -y git build-essential cmake ninja-build python3 python3-pip python3-pytest curl openssl libssl-dev pkg-config jq
 ```
 
-## 3. Забрать репозиторий
+## 3. Get the code
 
-infcore собирается внутри дерева llama.cpp как подкаталог `infcore/`:
+infcore builds inside the llama.cpp tree as the `infcore/` subdirectory:
 
 ```bash
 cd ~
@@ -66,18 +67,19 @@ git clone --depth 1 https://github.com/Nasferatuss/infcore-llm-gateway \
 cd engine-src
 ```
 
-Проверить, какая ревизия слоя infcore проверяется:
+Check which revision of the infcore layer is under test:
 
 ```bash
 git -C infcore rev-parse --short HEAD
 ```
 
-Пиннинг апстрима (тег движка, под который слой собран) — в `infcore/sbom.cdx.json`.
+The upstream pin (the engine tag the layer is built against) is in
+`infcore/sbom.cdx.json`.
 
-## 4. Положить модель в WSL
+## 4. Put the model into WSL
 
-Можно читать модель с Windows-диска через `/mnt/c/...`, но обычно быстрее скопировать
-её в файловую систему WSL.
+You can read the model from the Windows disk via `/mnt/c/...`, but copying it
+into the WSL filesystem is usually faster.
 
 ```bash
 mkdir -p ~/models
@@ -85,9 +87,9 @@ cp "/mnt/c/Models/qwen-your-model.gguf" ~/models/qwen.gguf
 ls -lh ~/models/qwen.gguf
 ```
 
-## 5. Собрать CUDA-версию под RTX 4070
+## 5. Build the CUDA version for the RTX 4070
 
-RTX 4070 — Ada, CUDA architecture `89`.
+The RTX 4070 is Ada, CUDA architecture `89`.
 
 ```bash
 cmake -S infcore -B build-infcore-cuda -G Ninja \
@@ -109,15 +111,15 @@ cmake -S infcore -B build-infcore-cuda -G Ninja \
 cmake --build build-infcore-cuda --target infcore_gateway infcore_cli llama-server infcore_unit_tests -j"$(nproc)"
 ```
 
-Запустить unit-тесты:
+Run the unit tests:
 
 ```bash
 ctest --test-dir build-infcore-cuda --output-on-failure
 ```
 
-## 6. Сначала проверить чистый llama-server
+## 6. Verify bare llama-server first
 
-Это отделяет проблемы модели/GPU от gateway.
+This separates model/GPU problems from gateway problems.
 
 ```bash
 MODEL="$HOME/models/qwen.gguf"
@@ -130,34 +132,34 @@ MODEL="$HOME/models/qwen.gguf"
   --n-gpu-layers 999
 ```
 
-Во втором WSL-терминале:
+In a second WSL terminal:
 
 ```bash
 curl -s http://127.0.0.1:18081/health
 ```
 
-Тест chat:
+Chat test:
 
 ```bash
 curl -s http://127.0.0.1:18081/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model":"qwen",
-    "messages":[{"role":"user","content":"Ответь коротко: 2+2?"}],
+    "messages":[{"role":"user","content":"Answer briefly: 2+2?"}],
     "max_tokens":64,
     "temperature":0.2
   }' | jq
 ```
 
-Если CUDA OOM:
+On CUDA OOM:
 
-- снизить `--n-gpu-layers`, например до `60`, `40`, `30`, `20`;
-- снизить `--ctx-size` до `2048`;
-- для RTX 4070 8 GB большие Qwen-модели будут только частично на GPU.
+- lower `--n-gpu-layers`, e.g. to `60`, `40`, `30`, `20`;
+- lower `--ctx-size` to `2048`;
+- on an RTX 4070 8 GB, large Qwen models will only partially fit on the GPU.
 
-Остановить `llama-server`: `Ctrl+C`.
+Stop `llama-server` with `Ctrl+C`.
 
-## 7. Создать конфиг gateway
+## 7. Create the gateway config
 
 ```bash
 mkdir -p ~/infcore-config ~/infcore-logs
@@ -233,32 +235,32 @@ cat > ~/infcore-config/gateway.local.json <<EOF
 EOF
 ```
 
-Если будет CUDA OOM, поменять в конфиге:
+On CUDA OOM, change in the config:
 
 ```json
 "n_gpu_layers": 40,
 "n_ctx": 2048
 ```
 
-## 8. Запустить gateway
+## 8. Start the gateway
 
-В первом терминале:
+In the first terminal:
 
 ```bash
-cd ~/llama.cpp
+cd ~/engine-src
 export INFCORE_KEY_ADMIN="$(cat ~/infcore-config/admin.key)"
 
 ./build-infcore-cuda/bin/infcore_gateway ~/infcore-config/gateway.local.json
 ```
 
-Оставить этот терминал открытым.
+Leave this terminal open.
 
-## 9. Проверить gateway
+## 9. Verify the gateway
 
-Во втором терминале:
+In the second terminal:
 
 ```bash
-cd ~/llama.cpp
+cd ~/engine-src
 export INFCORE_KEY="$(cat ~/infcore-config/admin.key)"
 ```
 
@@ -275,7 +277,8 @@ curl -s http://127.0.0.1:8080/v1/models \
   -H "Authorization: Bearer $INFCORE_KEY" | jq
 ```
 
-Первый chat-запрос впервые поднимет backend и может занять 1-3 минуты:
+The first chat request starts the backend for the first time and may take 1–3
+minutes:
 
 ```bash
 curl -s http://127.0.0.1:8080/v1/chat/completions \
@@ -283,7 +286,7 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model":"qwen35",
-    "messages":[{"role":"user","content":"Ответь коротко: столица России?"}],
+    "messages":[{"role":"user","content":"Answer briefly: what is the capital of France?"}],
     "max_tokens":64,
     "temperature":0.2,
     "stream":false
@@ -298,7 +301,7 @@ curl -N http://127.0.0.1:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model":"qwen35",
-    "messages":[{"role":"user","content":"Считай от 1 до 5."}],
+    "messages":[{"role":"user","content":"Count from 1 to 5."}],
     "max_tokens":128,
     "temperature":0.2,
     "stream":true
@@ -317,9 +320,10 @@ Audit:
 tail -n 5 ~/infcore-logs/audit.log | jq
 ```
 
-Проверить, что в audit есть `request_id`, `model_sha256`, `latency_ms`, `status`.
+Check that the audit records carry `request_id`, `model_sha256`, `latency_ms`,
+`status`.
 
-## 10. Проверить CLI
+## 10. Verify the CLI
 
 ```bash
 ./build-infcore-cuda/bin/infcore-cli --url http://127.0.0.1:8080 health
@@ -332,10 +336,10 @@ tail -n 5 ~/infcore-logs/audit.log | jq
 ./build-infcore-cuda/bin/infcore-cli \
   --url http://127.0.0.1:8080 \
   --key-file ~/infcore-config/admin.key \
-  chat -m qwen35 "Напиши одно предложение про локальные LLM."
+  chat -m qwen35 "Write one sentence about local LLMs."
 ```
 
-## 11. Запустить e2e tests
+## 11. Run the e2e tests
 
 ```bash
 export INFCORE_URL="http://127.0.0.1:8080"
@@ -346,79 +350,79 @@ export INFCORE_E2E_TIMEOUT="300"
 python3 -m pytest infcore/tests/e2e -v
 ```
 
-Embedding/vision/rerank тесты пропустятся, если не заданы соответствующие
-env-переменные. Для первой проверки это нормально.
+The embedding/vision/rerank tests are skipped unless the corresponding env
+variables are set. For a first pass that is fine.
 
-## 12. Проверить egress/product smoke
+## 12. Run the egress/product smoke test
 
-Этот тест в WSL может пройти или skip-нуться. Это зависит от того, разрешён ли
-`unshare -rn`.
+Under WSL this test may pass or be skipped, depending on whether `unshare -rn`
+is allowed.
 
 ```bash
 INFCORE_GATEWAY_BIN="$PWD/build-infcore-cuda/bin/infcore_gateway" \
 python3 -m pytest infcore/tests/egress -q -m egress
 ```
 
-Если `skipped` из-за netns — для WSL это допустимо. На Linux-сервере этот тест должен
-проходить.
+If it is `skipped` because of netns — that is acceptable on WSL. On a Linux
+server this test must pass.
 
-## 13. Следить за GPU
+## 13. Watch the GPU
 
-В отдельном PowerShell или WSL:
+In a separate PowerShell or WSL terminal:
 
 ```bash
 nvidia-smi -l 1
 ```
 
-Во время первого запроса должна появиться загрузка VRAM. Если VRAM забилась и процесс
-упал:
+During the first request, VRAM usage should appear. If VRAM filled up and the
+process died:
 
-1. уменьшить `"n_gpu_layers"`;
-2. уменьшить `"n_ctx"`;
-3. перезапустить gateway.
+1. lower `"n_gpu_layers"`;
+2. lower `"n_ctx"`;
+3. restart the gateway.
 
-## 14. Частые ошибки
+## 14. Common failures
 
 ### `502 backend start failed`
 
-- запустить `llama-server` напрямую как в шаге 6;
-- проверить путь `runtime.llama_server_bin`;
-- проверить путь `gguf_path`;
-- снизить `n_gpu_layers`.
+- run `llama-server` directly as in step 6;
+- check the `runtime.llama_server_bin` path;
+- check the `gguf_path`;
+- lower `n_gpu_layers`.
 
 ### `401 unauthorized`
 
-- используется не тот ключ;
-- проверить `export INFCORE_KEY=...`;
-- проверить, что gateway запущен с `INFCORE_KEY_ADMIN`.
+- the wrong key is being used;
+- check `export INFCORE_KEY=...`;
+- check that the gateway was started with `INFCORE_KEY_ADMIN`.
 
 ### `sha256 mismatch`
 
-- модель изменилась или путь не тот;
-- пересчитать:
+- the model changed or the path is wrong;
+- recompute:
 
 ```bash
 sha256sum ~/models/qwen.gguf
 stat -c%s ~/models/qwen.gguf
 ```
 
-### `artifact writable для group/other`
+### `artifact writable for group/other`
 
 ```bash
 chmod 0644 ~/models/qwen.gguf
 ```
 
-### CUDA не используется
+### CUDA is not being used
 
-- проверить `nvidia-smi`;
-- проверить, что сборка была с `-DGGML_CUDA=ON`;
-- в логах `llama-server` должен быть CUDA backend;
-- проверить, что `n_gpu_layers` не `0`.
+- check `nvidia-smi`;
+- check that the build had `-DGGML_CUDA=ON`;
+- the `llama-server` logs must mention the CUDA backend;
+- check that `n_gpu_layers` is not `0`.
 
-## 15. Что прислать после теста
+## 15. What to report after the test
 
 ```bash
-git rev-parse --short HEAD
+git -C infcore rev-parse --short HEAD
 ctest --test-dir build-infcore-cuda --output-on-failure
 curl -s http://127.0.0.1:8080/health
 curl -s http://127.0.0.1:8080/v1/models -H "Authorization: Bearer $INFCORE_KEY"
@@ -426,10 +430,10 @@ tail -n 3 ~/infcore-logs/audit.log
 nvidia-smi
 ```
 
-Также указать:
+Also include:
 
-- точное имя GGUF;
-- размер модели;
-- quantization, например `Q4_K_M`, `Q5_K_M`, `Q8_0`;
-- сколько VRAM заняло;
-- какой `n_gpu_layers` в итоге завёлся без OOM.
+- the exact GGUF name;
+- the model size;
+- the quantization, e.g. `Q4_K_M`, `Q5_K_M`, `Q8_0`;
+- how much VRAM it took;
+- which `n_gpu_layers` value ended up working without OOM.

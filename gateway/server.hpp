@@ -1,6 +1,6 @@
-// infcore gateway — лицензия MIT (см. LICENSE).
-// OpenAI-совместимый gateway: control-plane (auth/registry/routing/metrics) перед
-// бэкендами llama-server. Прокси с passthrough SSE для stream-ответов.
+// infcore gateway — MIT licence (see LICENSE).
+// OpenAI-compatible gateway: a control plane (auth/registry/routing/metrics) in front of
+// llama-server backends. Proxies with passthrough SSE for streaming responses.
 #pragma once
 
 #include <atomic>
@@ -16,9 +16,9 @@
 #include "security/authn/authn.h"
 #include "security/rbac/rbac.h"
 
-// Forward-декларация вместо #include "httplib.h": заголовок шлюза не должен тащить
-// за собой HTTP-библиотеку (её включает только server.cpp, а юнит-тесты собирают
-// config.cpp/json_schema.cpp без неё).
+// A forward declaration instead of #include "httplib.h": the gateway header must not drag
+// the HTTP library in with it (only server.cpp includes it, and the unit tests build
+// config.cpp/json_schema.cpp without it).
 namespace httplib { struct Request; }
 
 namespace infcore {
@@ -26,7 +26,7 @@ namespace infcore {
 class GatewayServer {
 public:
     explicit GatewayServer(GatewayConfig cfg);
-    int run();   // блокирующий; возвращает код выхода
+    int run();   // blocking; returns the exit code
 
 private:
     GatewayConfig cfg_;
@@ -38,17 +38,17 @@ private:
     Authorizer    rbac_;
     AuditLog      audit_;
 
-    // примитивные метрики (pull, /metrics)
+    // primitive metrics (pull, /metrics)
     std::mutex                                metrics_mu_;
     std::map<std::string, std::atomic<long>>  counters_;
 
-    // Гистограмма латентности запросов. Границы (сек) подобраны под инференс LLM:
-    // интерес не в микросекундах, а в диапазоне «доли секунды -> минуты», включая
-    // холодный старт бэкенда. Копится под metrics_mu_ вместе со счётчиками: одна
-    // запись на запрос, на фоне инференса стоимость блокировки неразличима.
+    // Request latency histogram. The bounds (seconds) are chosen for LLM inference: the
+    // interesting range is not microseconds but "fractions of a second -> minutes",
+    // including backend cold start. Accumulated under metrics_mu_ together with the
+    // counters: one write per request, and against inference the lock cost is negligible.
     struct LatencyHist {
         static constexpr size_t NBOUNDS = 12;
-        static const double bounds[NBOUNDS];        // верхние границы, сек
+        static const double bounds[NBOUNDS];        // upper bounds, seconds
         unsigned long long buckets[NBOUNDS + 1]{};  // +1 = +Inf
         unsigned long long count = 0;
         double             sum_seconds = 0.0;
@@ -65,10 +65,10 @@ private:
     void   inc(const std::string& key);
     long   get_counter(const std::string& key);
 
-    // Реальный IP клиента для audit-журнала. За доверенным reverse-proxy это
-    // X-Real-IP / X-Forwarded-For, иначе - peer соединения. См. cfg_.trusted_proxies:
-    // заголовкам верим ТОЛЬКО от доверенных прокси, иначе client_ip подделывается
-    // одним лишним заголовком в запросе.
+    // The client's real IP for the audit journal. Behind a trusted reverse proxy this is
+    // X-Real-IP / X-Forwarded-For, otherwise the connection peer. See cfg_.trusted_proxies:
+    // headers are trusted ONLY from trusted proxies, otherwise client_ip can be forged with
+    // one extra request header.
     std::string client_ip_of(const httplib::Request& req) const;
     std::string render_metrics();
     bool   allow_rate(const Principal& pr, std::string& reason);

@@ -1,83 +1,83 @@
-# infcore — правила алертинга (Prometheus / vmalert).
+# infcore — alerting rules (Prometheus / vmalert).
 #
-# Пороги латентности ниже подобраны под инференс LLM и ЗАВЕДОМО требуют калибровки
-# под ваше железо и модель: то, что для 35B на 8 GiB норма, для H100 — авария.
-# Снимите базовую линию нагрузочным прогоном (infcore/tests/load/loadtest.py) и
-# правьте пороги, а не отключайте алерты.
+# The latency thresholds below are sized for LLM inference and DEFINITELY need calibrating
+# to your hardware and model: what is normal for a 35B model on 8 GiB is an outage on an
+# H100. Take a baseline with a load run (infcore/tests/load/loadtest.py) and adjust the
+# thresholds rather than switching the alerts off.
 
 groups:
   - name: infcore-gateway
     rules:
-      # --- Доступность -------------------------------------------------------
+      # --- Availability ------------------------------------------------------
       - alert: InfcoreGatewayDown
         expr: up{job="infcore-gateway"} == 0
         for: 1m
         labels: { severity: critical }
         annotations:
-          summary: "infcore gateway не отвечает на скрейп"
-          description: "Цель {{ $labels.instance }} недоступна больше минуты."
+          summary: "infcore gateway is not answering scrapes"
+          description: "Target {{ $labels.instance }} has been unreachable for over a minute."
 
-      # --- Аудит -------------------------------------------------------------
-      # Самый важный алерт: при audit.require=true шлюз в этом состоянии отдаёт 503
-      # на ВЕСЬ трафик (fail-closed). Это простой сервиса, а не «что-то странное».
+      # --- Audit -------------------------------------------------------------
+      # The most important alert: with audit.require=true the gateway in this state answers
+      # 503 to ALL traffic (fail-closed). This is an outage, not a curiosity.
       - alert: InfcoreAuditFailed
         expr: infcore_gateway_audit_failed == 1
         for: 0m
         labels: { severity: critical }
         annotations:
-          summary: "Писатель audit-журнала упал — трафик режется fail-closed"
+          summary: "The audit journal writer died — traffic is being cut fail-closed"
           description: >-
-            Обычно это ENOSPC/EIO на разделе журнала. Шлюз не отдаёт трафик,
-            который не сможет записать. Проверьте место на диске и права.
+            Usually ENOSPC/EIO on the journal's partition. The gateway refuses traffic it
+            cannot record. Check free disk space and permissions.
 
-      # >0 означает: ротация де-факто не работает, журнал пишется в переименованный
-      # файл. Данные не теряются, но растут не там, где их ждёт logrotate.
+      # >0 means rotation is effectively not working and the journal is being written to the
+      # renamed file. Nothing is lost, but it grows somewhere logrotate is not looking.
       - alert: InfcoreAuditReopenFailing
         expr: increase(infcore_gateway_audit_reopen_failures_total[1h]) > 0
         for: 0m
         labels: { severity: warning }
         annotations:
-          summary: "Не удаётся переоткрыть audit-журнал после ротации"
+          summary: "The audit journal cannot be reopened after rotation"
           description: >-
-            Проверьте права на каталог журнала у пользователя сервиса и
+            Check the service user's permissions on the journal directory and
             /etc/logrotate.d/infcore.
 
-      # Тишина в reopens при живом logrotate = ротация не доезжает до шлюза
-      # (нет ExecReload / не тот postrotate). Журнал будет расти до упора,
-      # а при упоре в лимит размера аудит уйдёт в fail-closed.
+      # No reopens while logrotate is alive means rotation is not reaching the gateway (no
+      # ExecReload, or the wrong postrotate). The journal will grow unbounded, and once it
+      # hits the size limit the audit path fails closed.
       - alert: InfcoreAuditNotRotating
         expr: increase(infcore_gateway_audit_reopens_total[36h]) == 0
         for: 1h
         labels: { severity: warning }
         annotations:
-          summary: "Audit-журнал не переоткрывался больше суток"
+          summary: "The audit journal has not been reopened for over a day"
           description: >-
-            Ожидается daily-ротация. Проверьте, что logrotate доходит до
+            Daily rotation is expected. Check that logrotate reaches
             systemctl reload infcore-gateway (ExecReload=kill -HUP).
 
-      # --- Ошибки ------------------------------------------------------------
+      # --- Errors ------------------------------------------------------------
       - alert: InfcoreBackendErrors
         expr: increase(infcore_gateway_errors_total{type=~"backend_error|backend_unreachable|backend_start_failed"}[10m]) > 5
         for: 5m
         labels: { severity: warning }
         annotations:
-          summary: "Ошибки бэкенда llama-server: {{ $labels.type }}"
-          description: "Модель не поднимается или отваливается. Смотрите журнал юнита."
+          summary: "llama-server backend errors: {{ $labels.type }}"
+          description: "A model is failing to start or dropping out. Check the unit's journal."
 
-      # Всплеск 401 — либо ротация ключей поехала, либо перебор ключей.
+      # A spike of 401s means either a key rotation went wrong or someone is guessing keys.
       - alert: InfcoreAuthFailureSpike
         expr: increase(infcore_gateway_errors_total{type="unauthorized"}[5m]) > 20
         for: 5m
         labels: { severity: warning }
         annotations:
-          summary: "Всплеск неудачных авторизаций"
+          summary: "Spike of failed authorisations"
           description: >-
-            Либо у клиента протух ключ после ротации, либо это перебор.
-            Смотрите subject/client_ip в audit-журнале.
+            Either a client's key expired after a rotation, or this is brute force.
+            Check subject/client_ip in the audit journal.
 
-      # --- Насыщение ---------------------------------------------------------
-      # p95 латентности. ПОРОГ КАЛИБРОВАТЬ: 30с осмысленно для крупной модели с
-      # частичным offload; на H100 с моделью целиком в VRAM он должен быть в разы ниже.
+      # --- Saturation --------------------------------------------------------
+      # p95 latency. CALIBRATE THIS THRESHOLD: 30 s makes sense for a large model with a
+      # partial offload; on an H100 with the model entirely in VRAM it should be far lower.
       - alert: InfcoreLatencyHigh
         expr: |
           histogram_quantile(
@@ -87,13 +87,13 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "p95 латентности выше порога ({{ $value | humanize }}s)"
+          summary: "p95 latency is above the threshold ({{ $value | humanize }}s)"
           description: >-
-            Обычно это очередь: запросов больше, чем слотов у llama-server.
-            Сверьтесь с базовой линией из нагрузочного прогона.
+            Usually queueing: more requests than llama-server has slots for.
+            Compare against the baseline from your load run.
 
-      # Модели в реестре есть, но ни один бэкенд не поднят при живом трафике ->
-      # запросы упираются в холодный старт либо бэкенд не стартует вовсе.
+      # There are models in the registry but no backend is up while traffic is flowing ->
+      # requests are hitting cold starts, or the backend is not starting at all.
       - alert: InfcoreNoBackendUnderTraffic
         expr: |
           infcore_gateway_backends_loaded == 0
@@ -101,5 +101,5 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "Идёт трафик, но ни один бэкенд не поднят"
-          description: "Проверьте runtime.startup_timeout_ms и errors_total{type=~\"backend_.*\"}."
+          summary: "Traffic is flowing but no backend is up"
+          description: "Check runtime.startup_timeout_ms and errors_total{type=~\"backend_.*\"}."

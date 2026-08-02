@@ -12,13 +12,13 @@
       "required": ["host", "port"],
       "properties": {
         "host": { "type": "string", "default": "127.0.0.1" },
-        "trusted_proxies": { "type": "array", "items": { "type": "string" }, "description": "IPv4/CIDR доверенных reverse-proxy. Только для запросов с этих адресов client_ip в аудите берётся из X-Real-IP/X-Forwarded-For. Пусто = не доверять никому" },
+        "trusted_proxies": { "type": "array", "items": { "type": "string" }, "description": "IPv4/CIDR of trusted reverse proxies. Only for requests from these addresses is the audited client_ip taken from X-Real-IP/X-Forwarded-For. Empty = trust nobody" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "max_concurrent_requests": { "type": "integer", "minimum": 1, "default": 64, "description": "Размер пула воркеров = потолок одновременных запросов (SSE держит воркер весь стрим)" },
-        "request_timeout_ms": { "type": "integer", "minimum": 0, "default": 120000, "description": "Таймаут запроса к бэкенду (upstream)" },
-        "read_timeout_ms": { "type": "integer", "minimum": 0, "default": 30000, "description": "Таймаут чтения запроса от клиента (защита от slowloris)" },
-        "write_timeout_ms": { "type": "integer", "minimum": 0, "default": 120000, "description": "Таймаут записи ответа клиенту (освобождает воркер при мёртвом потребителе SSE)" },
-        "max_body_bytes": { "type": "integer", "minimum": 0, "default": 8388608, "description": "Потолок размера тела запроса в байтах (защита от OOM)" }
+        "max_concurrent_requests": { "type": "integer", "minimum": 1, "default": 64, "description": "Worker pool size = ceiling on concurrent requests (SSE holds a worker for the whole stream)" },
+        "request_timeout_ms": { "type": "integer", "minimum": 0, "default": 120000, "description": "Timeout of the request to the backend (upstream)" },
+        "read_timeout_ms": { "type": "integer", "minimum": 0, "default": 30000, "description": "Timeout for reading the request from the client (slowloris protection)" },
+        "write_timeout_ms": { "type": "integer", "minimum": 0, "default": 120000, "description": "Timeout for writing the response to the client (frees the worker when an SSE consumer is dead)" },
+        "max_body_bytes": { "type": "integer", "minimum": 0, "default": 8388608, "description": "Maximum request body size in bytes (OOM protection)" }
       }
     },
     "models": {
@@ -31,11 +31,11 @@
       "additionalProperties": false,
       "properties": {
         "authn": { "enum": ["api_key"], "default": "api_key" },
-        "api_keys": { "type": "array", "items": { "type": "string" }, "description": "legacy: плоский список ключей (роль admin)" },
+        "api_keys": { "type": "array", "items": { "type": "string" }, "description": "legacy: a flat list of keys (admin role)" },
         "rbac_enabled": { "type": "boolean", "default": true },
         "principals": {
           "type": "array",
-          "description": "API-ключ -> кто (subject) и роль (role)",
+          "description": "API key -> who (subject) and which role",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -49,7 +49,7 @@
         },
         "roles": {
           "type": "array",
-          "description": "Роль -> allowlists моделей и эндпоинтов ('*' = любые)",
+          "description": "Role -> allowlists of models and endpoints ('*' = any)",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -66,8 +66,8 @@
           "additionalProperties": false,
           "properties": {
             "sink": { "enum": ["file", "none"], "default": "file" },
-            "path": { "type": "string", "description": "Путь к append-only JSONL-журналу" },
-            "require": { "type": "boolean", "default": true, "description": "sink=file и журнал не открылся -> fail-fast (не отдавать трафик без аудита)" }
+            "path": { "type": "string", "description": "Path to the append-only JSONL journal" },
+            "require": { "type": "boolean", "default": true, "description": "sink=file and the journal failed to open -> fail fast (serve no traffic without audit)" }
           }
         }
       }
@@ -83,7 +83,7 @@
     "offline": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Жёсткий offline-режим: запрет любых исходящих соединений в рантайме.",
+      "description": "Strict offline mode: all outbound connections are forbidden at runtime.",
       "properties": {
         "enforce_no_egress": { "type": "boolean", "default": true },
         "require_model_integrity": { "type": "boolean", "default": false, "description": "Release gate: managed model artifacts must declare and match sha256 + size_bytes" }
@@ -92,9 +92,9 @@
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Lazy-подъём управляемых бэкендов (моделей без backend_url).",
+      "description": "Lazy start-up of managed backends (models without a backend_url).",
       "properties": {
-        "llama_server_bin": { "type": "string", "description": "Путь к llama-server из нашей сборки" },
+        "llama_server_bin": { "type": "string", "description": "Path to llama-server from our build" },
         "port_range_start": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 8100 },
         "idle_timeout_ms": { "type": "integer", "minimum": 0, "default": 300000 },
         "startup_timeout_ms": { "type": "integer", "minimum": 0, "default": 120000 },
@@ -111,15 +111,15 @@
       "required": ["logical_name"],
       "properties": {
         "logical_name": { "type": "string", "pattern": "^[a-z0-9._-]+$" },
-        "gguf_path": { "type": "string", "description": "Локальный путь к GGUF (offline)" },
-        "arch": { "type": "string", "description": "general.architecture из метаданных GGUF" },
-        "backend_url": { "type": "string", "description": "Внешний llama-server; если пусто - бэкенд управляется runtime-supervisor" },
-        "upstream_model": { "type": "string", "description": "Имя модели на бэкенде, если отличается от logical_name" },
+        "gguf_path": { "type": "string", "description": "Local path to the GGUF file (offline)" },
+        "arch": { "type": "string", "description": "general.architecture from the GGUF metadata" },
+        "backend_url": { "type": "string", "description": "An external llama-server; if empty, the backend is managed by the runtime supervisor" },
+        "upstream_model": { "type": "string", "description": "The model's name on the backend, if it differs from logical_name" },
         "modality": { "enum": ["text", "embedding", "vision", "rerank"], "default": "text" },
         "enabled": { "type": "boolean", "default": true },
         "n_ctx": { "type": "integer", "minimum": 512, "default": 8192 },
-        "n_gpu_layers": { "type": "integer", "minimum": -1, "default": 0, "description": "Слоёв на GPU. -1 = авто-подгонка llama.cpp под свободную VRAM (флаг бэкенду не передаётся); любое явное значение авто-подгонку отключает" },
-        "mmproj_path": { "type": "string", "description": "Проектор для vision (mtmd), если применимо" },
+        "n_gpu_layers": { "type": "integer", "minimum": -1, "default": 0, "description": "Layers on the GPU. -1 = let llama.cpp fit the offload to the free VRAM (the flag is not passed to the backend); any explicit value disables that auto-fit" },
+        "mmproj_path": { "type": "string", "description": "Projector for vision (mtmd), where applicable" },
         "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$", "description": "Expected SHA-256 of gguf_path" },
         "size_bytes": { "type": "integer", "minimum": 1, "description": "Expected byte size of gguf_path" },
         "mmproj_sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$", "description": "Expected SHA-256 of mmproj_path" },

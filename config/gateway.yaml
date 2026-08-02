@@ -1,22 +1,22 @@
-// infcore gateway - пример конфигурации (валидируется config/schema/gateway.schema.json).
-// Формат JSONC (JSON + // комментарии). Всё offline: веса локальные, egress запрещён.
+// infcore gateway - an example configuration (validated against config/schema/gateway.schema.json).
+// JSONC format (JSON + // comments). Everything is offline: local weights, no egress.
 {
   "server": {
     "host": "127.0.0.1",
     "port": 8080,
-    // размер пула воркеров = потолок одновременных запросов (SSE держит воркер весь стрим)
+    // worker pool size = ceiling on concurrent requests (SSE holds a worker for the whole stream)
     "max_concurrent_requests": 64,
-    "request_timeout_ms": 120000,   // таймаут запроса к бэкенду
-    "read_timeout_ms": 30000,       // защита от slowloris (медленная отправка клиентом)
-    "write_timeout_ms": 120000,     // освобождение воркера при мёртвом потребителе SSE
-    "max_body_bytes": 8388608       // потолок тела запроса (защита от OOM)
+    "request_timeout_ms": 120000,   // timeout of the request to the backend
+    "read_timeout_ms": 30000,       // slowloris protection (client sending the request slowly)
+    "write_timeout_ms": 120000,     // frees the worker when an SSE consumer is dead
+    "max_body_bytes": 8388608       // request body ceiling (OOM protection)
   },
   "security": {
     "authn": "api_key",
     "rbac_enabled": true,
-    // api_key поддерживает инъекцию секретов: "env:VAR" или "file:/path"
-    // (см. DEPLOY.md). Ключи открытым текстом в конфиге держать нельзя -
-    // здесь ссылки на переменные окружения (из EnvironmentFile / gateway.env).
+    // api_key supports secret injection: "env:VAR" or "file:/path" (see DEPLOY.md).
+    // Keys must never be kept in the config in plain text — these are references to
+    // environment variables (from EnvironmentFile / gateway.env).
     "principals": [
       { "api_key": "env:INFCORE_KEY_ADMIN", "subject": "alice",   "role": "admin" },
       { "api_key": "env:INFCORE_KEY_EMBED", "subject": "svc-embed", "role": "embeddings-only" },
@@ -29,14 +29,15 @@
       { "name": "rerank-only",     "allow_models": ["bge-reranker"],
         "allow_endpoints": ["/v1/rerank", "/v1/reranking", "/rerank", "/reranking", "/v1/models"] }
     ],
-    // require=true (по умолчанию): если журнал не открылся - шлюз не стартует
-    // (не отдаём трафик без аудита). Каталог создаёт systemd (LogsDirectory) / смонтируйте в Docker.
+    // require=true (the default): if the journal fails to open, the gateway does not start
+    // (no traffic without audit). The directory is created by systemd (LogsDirectory), or
+    // mount it under Docker.
     "audit": { "sink": "file", "path": "/var/log/infcore/audit.log", "require": true }
   },
   "observability": { "metrics_enabled": true, "metrics_path": "/metrics" },
   "offline": {
     "enforce_no_egress": true,
-    // Для финального релизного конфига поставьте true и заполните sha256/size_bytes у моделей.
+    // For a final release config set this to true and fill in sha256/size_bytes for the models.
     "require_model_integrity": false
   },
   "runtime": {

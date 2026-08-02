@@ -1,56 +1,57 @@
-# infcore - локальный стек offline-контура. В бою образы берутся из реестра контура.
+# infcore — a local stack for an offline deployment. In production the images come from the
+# deployment's own registry.
 #
-# ТОПОЛОГИЯ СЕТЕЙ (важно, здесь легко сделать неработающий или дырявый стек):
+# NETWORK TOPOLOGY (important: it is easy to build either a broken or a leaky stack here):
 #
-#   edge      обычная сеть. ТОЛЬКО angie. Через неё работает публикация 443 наружу.
-#   internal  internal: true, БЕЗ выхода в интернет. gateway, victoriametrics, angie.
+#   edge      an ordinary network. angie ONLY. Publishing 443 outward works through it.
+#   internal  internal: true, NO route to the internet. gateway, victoriametrics, angie.
 #
-#   gateway сидит ТОЛЬКО в internal и портов наружу НЕ публикует: до него ходит
-#   angie изнутри сети как http://gateway:8080.
+#   The gateway sits ONLY on internal and publishes NO ports outward: angie reaches it from
+#   inside the network as http://gateway:8080.
 #
-# Почему не проще. Docker `internal: true` действительно режет egress, но заодно
-# ЛОМАЕТ публикацию портов: контейнер, подключённый только к internal-сети, снаружи
-# недоступен, даже если у него указан ports:. Проверено экспериментально (один и тот
-# же образ: обычная сеть + -p -> доступен; только internal + -p -> недоступен).
-# Поэтому наружу смотрит angie (он в edge), а не gateway.
+# Why it is not simpler. Docker's `internal: true` does cut egress, but it also BREAKS port
+# publishing: a container attached only to an internal network is unreachable from outside
+# even with ports: set. Verified experimentally (same image: ordinary network + -p ->
+# reachable; internal only + -p -> unreachable). That is why angie faces outward, not the
+# gateway.
 #
-# Обратная сторона: у angie, раз он в edge, egress есть. Это осознанно: он - точка
-# входа, его обязано быть видно. Offline-инвариант держится там, где он важен - на
-# шлюзе, который работает с моделями и данными, и держится тремя рубежами:
-# internal-сеть, offline.enforce_no_egress в самом шлюзе, а на systemd-пути ещё и
-# IPAddressDeny. В настоящем закрытом контуре у хоста интернета нет вовсе, так что
-# edge - это доступ к стенду, а не в интернет.
+# The flip side: angie, being on edge, does have egress. That is deliberate — it is the
+# entry point and must be visible. The offline invariant is held where it matters, on the
+# gateway that touches models and data, and it is held by three lines of defence: the
+# internal network, offline.enforce_no_egress inside the gateway itself, and, on the systemd
+# path, IPAddressDeny as well. In a genuinely closed network the host has no internet at
+# all, so edge means access to the stand, not access to the internet.
 #
-# Перед запуском:
-#   1. cp gateway.env.example gateway.env  и вписать реальные ключи (openssl rand -hex 32).
-#   2. Положить сертификат внутреннего CA в /etc/infcore/tls/{infcore.crt,infcore.key}
-#      (key: chmod 600). ACME/Let's Encrypt в offline-контуре невозможен.
-#   3. В angie/infcore.conf поправить server_name и allow-список для /metrics.
-#   4. INFCORE_HOST=0.0.0.0 (ниже) заставляет gateway слушать все интерфейсы ВНУТРИ
-#      контейнера; смонтированный конфиг остаётся read-only с host=127.0.0.1 -
-#      env-override имеет приоритет. Управляемые llama-server всё равно слушают
-#      loopback внутри контейнера и требуют per-boot api-key.
-#   5. В конфиге шлюза указать server.trusted_proxies с подсетью angie - иначе за
-#      прокси в audit-журнале у КАЖДОЙ записи будет client_ip самого прокси.
+# Before starting:
+#   1. cp gateway.env.example gateway.env and fill in real keys (openssl rand -hex 32).
+#   2. Put the internal CA's certificate in /etc/infcore/tls/{infcore.crt,infcore.key}
+#      (key: chmod 600). ACME/Let's Encrypt is impossible in an offline deployment.
+#   3. In angie/infcore.conf fix up server_name and the allowlist for /metrics.
+#   4. INFCORE_HOST=0.0.0.0 (below) makes the gateway listen on all interfaces INSIDE the
+#      container; the mounted config stays read-only with host=127.0.0.1 — the env override
+#      wins. Managed llama-server processes still listen on loopback inside the container
+#      and still require the per-boot api key.
+#   5. Set server.trusted_proxies in the gateway config to angie's subnet — otherwise, behind
+#      the proxy, EVERY audit record will carry the proxy's own client_ip.
 services:
   gateway:
     image: infcore/gateway:0.1.0
     build:
-      context: ../../..          # корень дерева движка
+      context: ../../..          # the root of the engine tree
       dockerfile: infcore/deploy/docker/Dockerfile
-    restart: unless-stopped                        # упавший контейнер сам поднимается
+    restart: unless-stopped                        # a crashed container comes back on its own
     volumes:
       - /opt/infcore/models:/opt/infcore/models:ro
-      - ../../config/gateway.yaml:/opt/infcore/config/gateway.yaml:ro   # read-only; host правит INFCORE_HOST
-      - /var/log/infcore:/var/log/infcore          # append-only audit-журнал (на запись)
+      - ../../config/gateway.yaml:/opt/infcore/config/gateway.yaml:ro   # read-only; INFCORE_HOST overrides host
+      - /var/log/infcore:/var/log/infcore          # append-only audit journal (writable)
     environment:
-      - INFCORE_HOST=0.0.0.0                        # слушать все интерфейсы ВНУТРИ контейнера
+      - INFCORE_HOST=0.0.0.0                        # listen on all interfaces INSIDE the container
     env_file:
-      - path: ./gateway.env                        # секреты для env:VAR в конфиге (Compose >= 2.24)
+      - path: ./gateway.env                        # secrets for env:VAR in the config (Compose >= 2.24)
         required: false
-    # Наружу порт шлюза НЕ публикуем вовсе: точка входа - angie с TLS. Внутри сети
-    # compose шлюз доступен как gateway:8080 (см. upstream в angie/infcore.conf).
-    # Если angie не используется, верните: ports: ["127.0.0.1:8080:8080"].
+    # The gateway's port is NOT published outward at all: the entry point is angie with TLS.
+    # Inside the compose network the gateway is reachable as gateway:8080 (see the upstream in
+    # angie/infcore.conf). If you are not using angie, put back: ports: ["127.0.0.1:8080:8080"].
     expose: ["8080"]
     networks: [internal]
     read_only: true
@@ -60,12 +61,12 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 512
-    # ВНИМАНИЕ: подбирается ПОД МОДЕЛЬ, 16g - лишь дефолт под небольшие GGUF.
-    # Gateway сам занимает единицы МБ, но дочерний llama-server держит в RAM всё,
-    # что не уехало в VRAM. Замер: Qwen3.6-35B-A3B Q5_K_M (25.2 GiB на диске) при
-    # частичном offload на 8 GiB GPU -> RSS/PSS ~20.2 GiB, т.е. с 16g контейнер
-    # будет убит OOM-killer'ом. Ориентир: mem_limit >= размер GGUF - объём,
-    # реально уехавший в VRAM, плюс запас на KV-кэш и compute-буферы.
+    # NOTE: this is sized PER MODEL; 16g is only a default for small GGUFs.
+    # The gateway itself takes single-digit MB, but the child llama-server holds in RAM
+    # everything that did not go to VRAM. Measured: Qwen3.6-35B-A3B Q5_K_M (25.2 GiB on disk)
+    # with a partial offload to an 8 GiB GPU -> RSS/PSS ~20.2 GiB, i.e. with 16g the container
+    # gets killed by the OOM killer. Rule of thumb: mem_limit >= GGUF size minus what actually
+    # went to VRAM, plus headroom for the KV cache and compute buffers.
     mem_limit: 16g
     healthcheck:
       test: ["CMD", "/opt/infcore/bin/infcore-cli", "--url", "http://127.0.0.1:8080", "health"]
@@ -76,13 +77,13 @@ services:
     deploy:
       resources:
         reservations:
-          devices: [{ capabilities: [gpu] }]   # NVIDIA при GGML_CUDA=ON (нужен nvidia-container-toolkit)
+          devices: [{ capabilities: [gpu] }]   # NVIDIA with GGML_CUDA=ON (needs nvidia-container-toolkit)
 
-  # --- TLS-терминация ---------------------------------------------------------
-  # Точка входа контура. TLS терминируется здесь, а не в шлюзе: перевыпуск
-  # сертификата = reload прокси вместо рестарта шлюза (рестарт означал бы выгрузку
-  # модели и повторную проверку sha256 - десятки секунд простоя на крупной модели).
-  # Сертификат - от ВНУТРЕННЕГО CA: ACME/Let's Encrypt в offline-контуре невозможен.
+  # --- TLS termination --------------------------------------------------------
+  # The deployment's entry point. TLS is terminated here rather than in the gateway: renewing
+  # a certificate is then a proxy reload instead of a gateway restart (a restart would unload
+  # the model and re-verify its sha256 — tens of seconds of downtime on a large model).
+  # The certificate comes from an INTERNAL CA: ACME/Let's Encrypt is impossible offline.
   angie:
     image: docker.angie.software/angie:latest
     depends_on: [gateway]
@@ -91,15 +92,16 @@ services:
       - ../angie/infcore.conf:/etc/angie/http.d/infcore.conf:ro
       - /etc/infcore/tls:/etc/angie/tls:ro       # infcore.crt + infcore.key (key: chmod 600)
     ports:
-      - "443:443"                                # наружу только HTTPS
-    # edge нужен, чтобы публикация 443 вообще работала (на internal-only сети
-    # ports: не действует - см. шапку файла); internal - чтобы дойти до gateway.
+      - "443:443"                                # HTTPS only, outward
+    # edge is needed for publishing 443 to work at all (ports: has no effect on an
+    # internal-only network — see the header of this file); internal is needed to reach the
+    # gateway.
     networks: [edge, internal]
     read_only: true
     tmpfs:
       - /var/lib/angie:rw,noexec,nosuid,nodev,size=64m
     cap_drop: ["ALL"]
-    cap_add: ["NET_BIND_SERVICE"]                # нужен для listen 443
+    cap_add: ["NET_BIND_SERVICE"]                # required for listen 443
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -108,16 +110,16 @@ services:
       timeout: 5s
       retries: 3
 
-  # --- Метрики ----------------------------------------------------------------
-  # Скрейпит gateway:8080/metrics ВНУТРИ сети internal. Наружу /metrics не выпускаем:
-  # в самом шлюзе он отдаётся без авторизации (рассчитан на loopback).
+  # --- Metrics ----------------------------------------------------------------
+  # Scrapes gateway:8080/metrics INSIDE the internal network. /metrics is never exposed
+  # outward: the gateway serves it without authentication (it is meant for loopback).
   victoriametrics:
     image: victoriametrics/victoria-metrics:latest
     depends_on: [gateway]
     restart: unless-stopped
     command:
       - "-promscrape.config=/etc/vm/scrape.yml"
-      - "-retentionPeriod=6"                     # месяцев; согласуйте со сроком хранения аудита
+      - "-retentionPeriod=6"                     # months; align this with your audit retention
       - "-storageDataPath=/vm-data"
     volumes:
       - ../monitoring/scrape.yml:/etc/vm/scrape.yml:ro
@@ -130,10 +132,11 @@ volumes:
   vm-data: {}
 
 networks:
-  # Без выхода в интернет (offline-инвариант на уровне docker). ВНИМАНИЕ: побочно
-  # ломает публикацию портов - контейнер только в этой сети снаружи недоступен,
-  # даже с ports:. Поэтому gateway портов не публикует, а наружу смотрит angie.
+  # No route to the internet (the offline invariant, enforced by docker). NOTE: as a side
+  # effect this breaks port publishing — a container attached only to this network is
+  # unreachable from outside even with ports:. Hence the gateway publishes no ports and angie
+  # is what faces outward.
   internal: { driver: bridge, internal: true }
-  # Только для angie: через неё работает публикация 443. Egress у неё есть - в
-  # закрытом контуре ему всё равно некуда идти (у хоста нет интернета).
+  # For angie only: publishing 443 works through it. It does have egress — in a closed
+  # network there is nowhere for that egress to go anyway (the host has no internet).
   edge:     { driver: bridge }

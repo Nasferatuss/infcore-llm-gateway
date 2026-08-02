@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# Запускает команду с ограничением размера любого файла (RLIMIT_FSIZE) —
-# детерминированно имитирует «диск полон» (ENOSPC/EFBIG) для проверки fail-closed
-# аудита. Портируемо (Linux/macOS), в отличие от шелла `ulimit -f`.
+# Runs a command with a maximum file size limit (RLIMIT_FSIZE), deterministically simulating
+# a full disk (ENOSPC/EFBIG) to exercise the audit fail-closed path. Portable across
+# Linux/macOS, unlike the shell's `ulimit -f`.
 #   rlimit_exec.py <bytes> <cmd> [args...]
 import os, sys, resource
 
 nbytes = int(sys.argv[1])
-resource.setrlimit(resource.RLIMIT_FSIZE, (nbytes, nbytes))  # наследуется через exec
+resource.setrlimit(resource.RLIMIT_FSIZE, (nbytes, nbytes))  # inherited across exec
 os.execvp(sys.argv[2], sys.argv[2:])

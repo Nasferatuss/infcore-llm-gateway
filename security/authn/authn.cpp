@@ -1,4 +1,4 @@
-// infcore — корп. лицензия.
+// infcore — MIT licence (see LICENSE).
 #include "authn/authn.h"
 
 #include <cctype>
@@ -6,8 +6,8 @@
 namespace infcore {
 
 namespace {
-// Сравнение без раннего выхода: время зависит только от длины token, не от
-// содержимого/длины сохранённого ключа и не от позиции расхождения.
+// Comparison without an early exit: the running time depends only on the length of the
+// token, not on the contents or length of the stored key, nor on where they diverge.
 bool ct_eq(const std::string& token, const std::string& key) {
     unsigned diff = (unsigned)(token.size() ^ key.size());
     for (size_t i = 0; i < token.size(); ++i)
@@ -25,14 +25,14 @@ bool Authenticator::verify(const std::string& token, Principal& out) const {
     bool found = false;
     Principal p;
     for (const auto& e : keys_) {
-        if (ct_eq(token, e.key)) { found = true; p = e.principal; }  // без break: постоянное число сравнений
+        if (ct_eq(token, e.key)) { found = true; p = e.principal; }  // no break: a constant number of comparisons
     }
     if (found) out = p;
     return found;
 }
 
 std::string parse_bearer(const std::string& header) {
-    const std::string pfx = "bearer ";           // схема auth регистронезависима (RFC 7235)
+    const std::string pfx = "bearer ";           // the auth scheme is case-insensitive (RFC 7235)
     if (header.size() <= pfx.size()) return std::string();
     for (size_t i = 0; i < pfx.size(); ++i)
         if (std::tolower((unsigned char)header[i]) != pfx[i]) return std::string();

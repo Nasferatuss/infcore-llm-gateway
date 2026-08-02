@@ -1,4 +1,4 @@
-// infcore — корп. лицензия.
+// infcore — MIT licence (see LICENSE).
 #include "rbac/rbac.h"
 
 namespace infcore {

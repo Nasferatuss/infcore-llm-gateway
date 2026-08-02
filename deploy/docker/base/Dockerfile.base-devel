@@ -1,23 +1,23 @@
-# СКЕЛЕТ build-образа infcore. Собрать один раз и запушить в реестр контура
-# под тегом infcore/base-devel:1.7; интернет допустим только здесь.
-# Имена пакетов - под репозиторий вашей ОС (пример - Debian-подобная).
-# Для RPM-дистрибутивов замените apt на dnf/apt-rpm и имена пакетов соответственно.
+# A SKELETON of the infcore build image. Build it once and push it to your deployment's
+# registry as infcore/base-devel:1.7; the internet is permitted only here.
+# Package names follow your OS's repository (the example is Debian-like).
+# For RPM distributions, replace apt with dnf/apt-rpm and adjust the package names.
 
-# FROM - базовая ОС контура. Здесь публичный Debian, чтобы скелет собирался
-# как есть; в изолированном контуре подставьте свой базовый образ.
+# FROM is your deployment's base OS. A public Debian is used here so the skeleton builds
+# as-is; in an isolated network, substitute your own base image.
 FROM debian:12-slim
 
-# Toolchain + CMake + утилиты сборки (из внутреннего зеркала пакетов).
+# Toolchain + CMake + build utilities (from the internal package mirror).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential g++ make ninja-build cmake git ca-certificates \
-      # Vulkan SDK: заголовки + компилятор шейдеров (glslc/glslangValidator)
+      # Vulkan SDK: headers + the shader compiler (glslc/glslangValidator)
       libvulkan-dev glslang-tools spirv-tools \
  && rm -rf /var/lib/apt/lists/*
 
-# CUDA toolkit (nvcc + dev-библиотеки) под ваш парк GPU. Ставится из внутреннего
-# зеркала NVIDIA. Версия должна покрывать арх 75..90 (см. profile-portable.cmake).
-# Пример (адаптируйте версию/канал под зеркало):
+# The CUDA toolkit (nvcc + dev libraries) for your GPU fleet, installed from the internal
+# NVIDIA mirror. The version must cover architectures 75..90 (see profile-portable.cmake).
+# Example (adapt the version and channel to your mirror):
 #   RUN apt-get update && apt-get install -y cuda-toolkit-12-4 && rm -rf /var/lib/apt/lists/*
-# GPU на стадии сборки НЕ требуется (CMAKE_CUDA_ARCHITECTURES пиновано, не "native").
+# A GPU is NOT required at build time (CMAKE_CUDA_ARCHITECTURES is pinned, not "native").
 
-# Проверка: cmake --version >= 3.21, nvcc --version, glslc --version.
+# Check with: cmake --version >= 3.21, nvcc --version, glslc --version.

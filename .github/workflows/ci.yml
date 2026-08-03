@@ -101,10 +101,16 @@ jobs:
           # ("mu_ is held by the caller", "returns with the lock held") — these
           # jobs turn them into something checked on every push rather than
           # asserted in a comment.
+          # -fPIE/-pie is not optional here: the cpu profile sets
+          # BUILD_SHARED_LIBS=OFF, and ThreadSanitizer refuses to run in a
+          # non-PIE binary — it aborts at start-up with
+          # "FATAL: ThreadSanitizer: unexpected memory mapping".
           - san: thread
-            flags: "-fsanitize=thread -g -O1 -fno-omit-frame-pointer"
+            flags: "-fsanitize=thread -fPIE -g -O1 -fno-omit-frame-pointer"
+            link: "-fsanitize=thread -pie"
           - san: address
             flags: "-fsanitize=address,undefined -fno-sanitize-recover=undefined -g -O1 -fno-omit-frame-pointer"
+            link: "-fsanitize=address,undefined"
     steps:
       - name: Check out the engine
         uses: actions/checkout@v4
@@ -123,6 +129,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libssl-dev
 
+      # Modern kernels randomise mmap with more entropy than the sanitizer
+      # runtimes support, and the binary aborts before main():
+      #   FATAL: ThreadSanitizer: unexpected memory mapping 0x...
+      # 28 is the highest value the runtimes handle. Nothing to do with infcore;
+      # every sanitized build on these images needs it.
+      - name: Cap mmap randomisation for the sanitizer runtime
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
       - name: Configure with ${{ matrix.san }} sanitizer
         working-directory: engine-src
         run: |
@@ -130,7 +144,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_FLAGS="${{ matrix.flags }}" \
             -DCMAKE_CXX_FLAGS="${{ matrix.flags }}" \
-            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.flags }}"
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.link }}"
 
       - name: Build gateway and unit tests
         working-directory: engine-src
@@ -203,19 +217,21 @@ jobs:
         working-directory: engine-src
         run: bash infcore/tests/manual/hardening_smoke.sh ./build/bin/infcore_gateway
 
-      # Only infcore's own sources count. The engine is vendored, unmodified and
-      # tested upstream; folding it in would inflate the denominator and hide
-      # what is actually covered here.
+      # --root infcore is what scopes the report: only infcore's own sources are
+      # counted. The engine is vendored, unmodified and tested upstream; folding
+      # it in would inflate the denominator and hide what is actually covered.
+      # The test sources themselves are excluded — a suite covering itself is not
+      # a measurement.
       - name: Report
         working-directory: engine-src
         run: |
           gcovr --root infcore \
-                --filter 'infcore/(gateway|security|registry|runtime)/' \
                 --exclude '.*/tests/.*' \
                 --print-summary \
                 --html-details coverage.html \
                 --xml coverage.xml \
-                --txt coverage.txt
+                --txt coverage.txt \
+                build
           {
             echo '### infcore coverage'
             echo

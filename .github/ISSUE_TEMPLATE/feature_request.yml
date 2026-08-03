@@ -1,0 +1,45 @@
+name: Proposal
+description: Suggest a capability, or discuss a design change before writing it
+labels: [proposal]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Anything larger than a small, self-contained change is worth discussing
+        here first — it is cheaper than finding out at review time that the
+        design does not fit.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What can you not do today, and what are you doing instead? Describe the
+        situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: Include the config or API surface it would add, if any.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Engine boundary
+      description: >
+        infcore wraps llama.cpp without editing it. If a proposal needs the
+        engine to change, it belongs upstream first.
+      options:
+        - label: This can be built without modifying any file outside `infcore/`
+        - label: This keeps the offline invariant — no outbound traffic at runtime
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including "do nothing" and why that is not enough.

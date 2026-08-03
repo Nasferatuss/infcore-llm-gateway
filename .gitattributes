@@ -1,0 +1,19 @@
+# Normalise line endings in the repository to LF, and check shell scripts and
+# CMake cache-init files out as LF everywhere — including Windows clones with
+# core.autocrlf=true. Without this, a Windows checkout gives every *.sh a CR at
+# end of line, and bash fails on the first one:
+#   hardening_smoke.sh: line 14: set: -: invalid option
+* text=auto
+
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.cmake     text eol=lf
+Dockerfile* text eol=lf
+*.service   text eol=lf
+*.conf      text eol=lf
+
+# Binary-ish: never touched.
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.gguf binary

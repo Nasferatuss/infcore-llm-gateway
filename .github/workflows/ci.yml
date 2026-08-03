@@ -48,3 +48,187 @@ jobs:
         run: |
           ./build/bin/infcore-cli | head -1
           ./build/bin/infcore_gateway --help || true
+
+  hardening:
+    name: hardening smoke (fake backend)
+    runs-on: ubuntu-latest
+    steps:
+      # The gateway does not link libllama — backends are separate processes —
+      # and the smoke test drives a fake Python backend, so this job needs
+      # neither the engine build nor a model. Target-only build, ~1 minute.
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          path: engine-src
+          fetch-depth: 1
+
+      - name: Check out infcore into the engine tree
+        uses: actions/checkout@v4
+        with:
+          path: engine-src/infcore
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev
+
+      - name: Configure
+        working-directory: engine-src
+        run: cmake -S infcore -B build -C infcore/cmake/profile-cpu.cmake
+
+      - name: Build the gateway only
+        working-directory: engine-src
+        run: cmake --build build --target infcore_gateway -j"$(nproc)"
+
+      # M5 body limit, B3 responsiveness during SIGTERM->SIGKILL, F1 a disable
+      # racing backend start-up, F2 audit failure must fail closed. These are the
+      # production fixes; before this job they were only ever run by hand, which
+      # is how a stale grep string survived several commits unnoticed.
+      - name: Hardening smoke
+        working-directory: engine-src
+        run: bash infcore/tests/manual/hardening_smoke.sh ./build/bin/infcore_gateway
+
+  sanitizers:
+    name: ${{ matrix.san }} sanitizer
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The gateway runs threads, a condition variable, a shared SSE pump and
+          # fork/exec. The locking invariants are written down in the sources
+          # ("mu_ is held by the caller", "returns with the lock held") — these
+          # jobs turn them into something checked on every push rather than
+          # asserted in a comment.
+          - san: thread
+            flags: "-fsanitize=thread -g -O1 -fno-omit-frame-pointer"
+          - san: address
+            flags: "-fsanitize=address,undefined -fno-sanitize-recover=undefined -g -O1 -fno-omit-frame-pointer"
+    steps:
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          path: engine-src
+          fetch-depth: 1
+
+      - name: Check out infcore into the engine tree
+        uses: actions/checkout@v4
+        with:
+          path: engine-src/infcore
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev
+
+      - name: Configure with ${{ matrix.san }} sanitizer
+        working-directory: engine-src
+        run: |
+          cmake -S infcore -B build -C infcore/cmake/profile-cpu.cmake \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_FLAGS="${{ matrix.flags }}" \
+            -DCMAKE_CXX_FLAGS="${{ matrix.flags }}" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.flags }}"
+
+      - name: Build gateway and unit tests
+        working-directory: engine-src
+        run: cmake --build build --target infcore_gateway infcore_unit_tests -j"$(nproc)"
+
+      - name: Unit tests
+        working-directory: engine-src
+        env:
+          TSAN_OPTIONS: halt_on_error=1 second_deadlock_stack=1
+          UBSAN_OPTIONS: print_stacktrace=1 halt_on_error=1
+        run: ctest --test-dir build --output-on-failure
+
+      # Where the sanitizers earn their keep: the smoke test is the only thing
+      # that exercises concurrent shutdown, a disable racing start-up, and the
+      # audit failure path — all under real threads and real child processes.
+      - name: Hardening smoke under ${{ matrix.san }}
+        working-directory: engine-src
+        env:
+          TSAN_OPTIONS: halt_on_error=1 second_deadlock_stack=1
+          # The gateway forks and execs child backends; LSan's at-exit check
+          # reports the child's inherited allocations, which is noise, not a leak
+          # in the gateway. Everything else in ASan/UBSan stays fatal.
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1 halt_on_error=1
+        run: bash infcore/tests/manual/hardening_smoke.sh ./build/bin/infcore_gateway
+
+  coverage:
+    name: test coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the engine
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          path: engine-src
+          fetch-depth: 1
+
+      - name: Check out infcore into the engine tree
+        uses: actions/checkout@v4
+        with:
+          path: engine-src/infcore
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libssl-dev gcovr
+
+      - name: Configure with coverage instrumentation
+        working-directory: engine-src
+        run: |
+          cmake -S infcore -B build -C infcore/cmake/profile-cpu.cmake \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="--coverage -O0 -g" \
+            -DCMAKE_CXX_FLAGS="--coverage -O0 -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+
+      - name: Build gateway and unit tests
+        working-directory: engine-src
+        run: cmake --build build --target infcore_gateway infcore_unit_tests -j"$(nproc)"
+
+      # Both suites feed the same counters: unit tests cover config parsing and
+      # schema validation, the smoke test drives the running binary through the
+      # server, supervisor and security layers. Measuring only the unit tests
+      # would report a number that says nothing about the parts that matter.
+      - name: Unit tests
+        working-directory: engine-src
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Hardening smoke
+        working-directory: engine-src
+        run: bash infcore/tests/manual/hardening_smoke.sh ./build/bin/infcore_gateway
+
+      # Only infcore's own sources count. The engine is vendored, unmodified and
+      # tested upstream; folding it in would inflate the denominator and hide
+      # what is actually covered here.
+      - name: Report
+        working-directory: engine-src
+        run: |
+          gcovr --root infcore \
+                --filter 'infcore/(gateway|security|registry|runtime)/' \
+                --exclude '.*/tests/.*' \
+                --print-summary \
+                --html-details coverage.html \
+                --xml coverage.xml \
+                --txt coverage.txt
+          {
+            echo '### infcore coverage'
+            echo
+            echo '```'
+            cat coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            engine-src/coverage*.html
+            engine-src/coverage.xml
+          if-no-files-found: error

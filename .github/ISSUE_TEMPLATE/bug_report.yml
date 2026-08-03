@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in the gateway behaves differently from what is documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Not for security issues — those go through
+        [private reporting](https://github.com/Nasferatuss/infcore-llm-gateway/security/advisories/new).
+        Not for llama.cpp bugs either: infcore does not edit the engine, so an
+        engine defect belongs [upstream](https://github.com/ggml-org/llama.cpp/issues).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >
+        Commands, the request you sent, and the response you got. A minimal
+        gateway config that shows it is the most useful thing you can include —
+        with API keys removed.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: infcore commit
+      placeholder: output of `git rev-parse --short HEAD`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Build profile
+      options: [profile-cpu, profile-h100, profile-portable, other / custom cmake]
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, compiler, how it is deployed (bare, systemd, Docker Compose).
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Gateway stderr and relevant audit lines
+      description: Redact keys and anything private before pasting.
+      render: shell

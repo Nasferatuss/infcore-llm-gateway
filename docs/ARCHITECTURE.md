@@ -152,7 +152,7 @@ sequenceDiagram
         G-->>C: 403
     end
     G->>S: backend for m
-    Note over S: Stopped → Starting.<br/>Port taken under the lock;<br/>a failed start releases it.
+    Note over S: Stopped → Starting.<br/>Port taken under the lock.<br/>A failed start releases it.
     S->>B: fork/exec, 127.0.0.1 + per-boot --api-key
     loop until ready or timeout
         S->>B: GET /health

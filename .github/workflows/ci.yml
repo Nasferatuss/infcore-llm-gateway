@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # No branch filter. With `branches: [main]` a pull request that targets another
+  # pull request's branch gets no CI at all — exactly the case where an untested
+  # change is easiest to miss. AI-agents-enterprise already triggers this way.
   pull_request:
-    branches: [main]
 
 jobs:
   build:

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# Фейковый llama-server для ручных hardening-тестов gateway (infcore/tests/manual).
-# Парсит подмножество аргументов реального llama-server, отдаёт /health и
-# OpenAI-эндпоинты. Опции для проверки супервайзера:
-#   --ready-delay SEC   : /health отдаёт 503 первые SEC секунд ("модель грузится")
-#   --ignore-sigterm    : игнорировать SIGTERM (форсит путь SIGKILL в супервайзере)
+# A fake llama-server for the gateway's manual hardening tests (infcore/tests/manual).
+# It parses a subset of the real llama-server's arguments and serves /health plus the
+# OpenAI endpoints. Options for exercising the supervisor:
+#   --ready-delay SEC   : /health returns 503 for the first SEC seconds ("model loading")
+#   --ignore-sigterm    : ignore SIGTERM (forces the supervisor's SIGKILL path)
 import argparse, json, os, sys, time, signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -56,7 +56,7 @@ class H(BaseHTTPRequestHandler):
         if body.get("stream"):
             self.send_response(200); self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
-            for tok in ["Привет", ", ", "мир"]:
+            for tok in ["Hello", ", ", "world"]:
                 chunk = {"choices": [{"delta": {"content": tok}}]}
                 self.wfile.write(f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode())
                 self.wfile.flush()

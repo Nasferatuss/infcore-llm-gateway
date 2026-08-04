@@ -7,16 +7,16 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 find_package(OpenSSL REQUIRED)
 
 # -----------------------------------------------------------------------------
-# Встраиваем движок llama.cpp (родительский каталог) БЕЗ изменений его файлов.
-# llama.cpp штатно поддерживает использование через add_subdirectory.
-# Флаги бэкендов/состава задаются профилем: cmake -C infcore/cmake/profile-portable.cmake
+# The llama.cpp engine (the parent directory) is embedded WITHOUT editing any of its files.
+# llama.cpp officially supports being used through add_subdirectory.
+# Backend and component flags come from a profile: cmake -C infcore/cmake/profile-portable.cmake
 # -----------------------------------------------------------------------------
 set(INFCORE_LLAMA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH
-    "Корень дерева llama.cpp")
+    "Root of the llama.cpp tree")
 
-# При встраивании через add_subdirectory LLAMA_STANDALONE=OFF, поэтому
-# common/server по умолчанию НЕ собираются. Нам они нужны (gateway линкует
-# llama-common; сервер — основа OpenAI-API). Форсируем до подключения движка.
+# When embedded via add_subdirectory, LLAMA_STANDALONE=OFF, so common/server are NOT built
+# by default. We need both (the gateway links llama-common, and the server is the basis of
+# the OpenAI API), so they are forced on before the engine is pulled in.
 set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
 
 if(NOT TARGET llama)
@@ -24,16 +24,16 @@ if(NOT TARGET llama)
 endif()
 
 # -----------------------------------------------------------------------------
-# Встраиваем JSON-Schema в бинарь: единый источник истины - файл схемы,
-# заголовок генерируется на этапе конфигурации (config валидируется по нему при
-# старте). Правка схемы должна пере-встраивать заголовок (иначе file(READ)
-# кэшируется) - отсюда CMAKE_CONFIGURE_DEPENDS.
+# The JSON schema is embedded into the binary: the schema file is the single source of
+# truth and the header is generated at configure time (the config is validated against it
+# at start-up). Editing the schema must re-embed the header (otherwise file(READ) is
+# cached) — hence CMAKE_CONFIGURE_DEPENDS.
 #
-# Генерируем РОВНО ОДИН РАЗ здесь, а не в каждом потребителе (gateway, tests):
-# повторный set_property(CMAKE_CONFIGURE_DEPENDS) на тот же файл из двух
-# каталогов заставляет генератор Ninja выпустить два правила на один и тот же
-# выход -> "multiple rules generate ... gateway.schema.json [-w dupbuild=err]".
-# Потребители подключают заголовок через INTERFACE-таргет infcore_schema.
+# Generated EXACTLY ONCE here rather than in each consumer (gateway, tests): repeating
+# set_property(CMAKE_CONFIGURE_DEPENDS) for the same file from two directories makes the
+# Ninja generator emit two rules for one output ->
+# "multiple rules generate ... gateway.schema.json [-w dupbuild=err]".
+# Consumers pull the header in through the infcore_schema INTERFACE target.
 # -----------------------------------------------------------------------------
 set(INFCORE_SCHEMA_FILE ${CMAKE_CURRENT_SOURCE_DIR}/config/schema/gateway.schema.json)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${INFCORE_SCHEMA_FILE})
@@ -48,8 +48,8 @@ target_include_directories(infcore_schema INTERFACE
     ${CMAKE_CURRENT_BINARY_DIR}/infcore_generated)
 
 # -----------------------------------------------------------------------------
-# Слой «своё» (лицензия MIT). Общается с движком только через C-API
-# llama.h и через хелперы llama-common; файлы апстрима не редактируются.
+# Our own layer (MIT licence). It talks to the engine only through the llama.h C API and
+# the llama-common helpers; upstream files are never edited.
 # -----------------------------------------------------------------------------
 add_subdirectory(security)
 add_subdirectory(registry)
@@ -57,10 +57,10 @@ add_subdirectory(runtime)
 add_subdirectory(gateway)
 add_subdirectory(cli)
 
-option(INFCORE_BUILD_TESTS "Собирать юнит-тесты infcore (ctest)" ON)
+option(INFCORE_BUILD_TESTS "Build the infcore unit tests (ctest)" ON)
 if(INFCORE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
 
-message(STATUS "infcore: движок встроен из ${INFCORE_LLAMA_ROOT}")
+message(STATUS "infcore: engine embedded from ${INFCORE_LLAMA_ROOT}")

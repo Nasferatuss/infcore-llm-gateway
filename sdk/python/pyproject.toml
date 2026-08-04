@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "infcore-sdk"
 version = "0.1.0"
-description = "Клиентский SDK для внутреннего infcore gateway (offline LLM)"
+description = "Client SDK for the infcore gateway (offline LLM)"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }
-dependencies = []   # без внешних зависимостей; при необходимости — из внутреннего PyPI-зеркала
+dependencies = []   # no external dependencies; if any are added, take them from an internal PyPI mirror
 
 [tool.setuptools.packages.find]
 where = ["."]

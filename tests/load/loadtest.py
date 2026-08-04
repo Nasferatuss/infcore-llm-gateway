@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""infcore gateway — нагрузочный прогон.
+"""infcore gateway — load run.
 
-Гоняет N параллельных чат-сессий против gateway и печатает латентность
-(p50/p95/p99), throughput и разбивку ошибок. Нужен, чтобы отличить
-"работает на одном запросе" от "работает под нагрузкой": очередь бэкенда,
-таймауты, деградация и OOM видны только здесь.
+Drives N concurrent chat sessions against the gateway and prints latency (p50/p95/p99),
+throughput and an error breakdown. It exists to tell "works for one request" apart from
+"works under load": backend queueing, timeouts, degradation and OOM only show up here.
 
-Только stdlib — на offline-контуре ставить requests/httpx неоткуда.
+Standard library only — in an offline deployment there is nowhere to install
+requests/httpx from.
 
-Пример:
+Example:
     python3 loadtest.py --url http://127.0.0.1:8080 --key-file admin.key \
         --model qwen35 --concurrency 8 --requests 32 --max-tokens 64
 """
@@ -28,16 +28,16 @@ from concurrent.futures import ThreadPoolExecutor
 def parse_args():
     p = argparse.ArgumentParser(description="infcore gateway load test")
     p.add_argument("--url", default="http://127.0.0.1:8080")
-    p.add_argument("--key", help="API-ключ (или --key-file)")
-    p.add_argument("--key-file", help="файл с API-ключом")
+    p.add_argument("--key", help="API key (or --key-file)")
+    p.add_argument("--key-file", help="file containing the API key")
     p.add_argument("--model", required=True)
     p.add_argument("--concurrency", type=int, default=4)
     p.add_argument("--requests", type=int, default=16)
     p.add_argument("--max-tokens", type=int, default=64)
     p.add_argument("--timeout", type=float, default=600.0)
     p.add_argument("--prompt-tokens", type=int, default=0,
-                   help="набить промпт примерно до N токенов (тест длинного контекста)")
-    p.add_argument("--stream", action="store_true", help="мерить TTFT в режиме stream")
+                   help="pad the prompt to roughly N tokens (long-context test)")
+    p.add_argument("--stream", action="store_true", help="measure TTFT in streaming mode")
     return p.parse_args()
 
 
@@ -47,22 +47,22 @@ def resolve_key(args):
             return f.read().strip()
     if args.key:
         return args.key
-    sys.exit("нужен --key или --key-file")
+    sys.exit("--key or --key-file is required")
 
 
 def build_prompt(target_tokens):
-    base = "Кратко ответь одним предложением: зачем нужен контроль целостности модели?"
+    base = "Answer briefly, in one sentence: why does a model need an integrity check?"
     if target_tokens <= 0:
         return base
-    # Филлер — ASCII-слово с ведущим пробелом: у BPE-словарей это стабильно ~1
-    # токен на повтор. Кириллица здесь не годится: "факт номер 7 не важен."
-    # разворачивается в ~11 токенов, и запрос молча улетает за n_ctx.
+    # The filler is an ASCII word with a leading space: with BPE vocabularies that is a
+    # steady ~1 token per repeat. Non-Latin scripts do not work here — a short Cyrillic
+    # phrase expands to roughly a dozen tokens, and the request silently overruns n_ctx.
     filler = " data" * target_tokens
     return f"Ignore this filler:{filler}\n\n{base}"
 
 
 class Stats:
-    """Потокобезопасный сбор результатов."""
+    """Thread-safe result collection."""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -124,7 +124,7 @@ def one_request(args, key, prompt, stats):
         stats.record_err(f"URLError {e.reason}")
     except TimeoutError:
         stats.record_err("timeout")
-    except Exception as e:  # соединение оборвано, битый JSON и пр.
+    except Exception as e:  # dropped connection, malformed JSON, and so on
         stats.record_err(type(e).__name__)
 
 
@@ -152,25 +152,25 @@ def main():
 
     lat = sorted(stats.latencies)
     total = args.requests
-    print("\n=== РЕЗУЛЬТАТ ===")
-    print(f"успешно:        {stats.ok}/{total}")
-    print(f"ошибок:         {sum(stats.errors.values())}")
+    print("\n=== RESULT ===")
+    print(f"succeeded:      {stats.ok}/{total}")
+    print(f"failed:         {sum(stats.errors.values())}")
     for kind, n in stats.errors.most_common():
         print(f"  - {kind}: {n}")
     print(f"wall:           {wall:.1f} s")
-    print(f"пропускная сп.: {stats.ok / wall:.2f} req/s")
+    print(f"throughput:     {stats.ok / wall:.2f} req/s")
     if stats.completion_tokens:
-        print(f"токенов всего:  {stats.completion_tokens} "
-              f"({stats.completion_tokens / wall:.1f} tok/s агрегированно)")
+        print(f"total tokens:   {stats.completion_tokens} "
+              f"({stats.completion_tokens / wall:.1f} tok/s aggregate)")
     if lat:
-        print(f"латентность:    min={lat[0]:.2f} p50={pct(lat, 50):.2f} "
+        print(f"latency:        min={lat[0]:.2f} p50={pct(lat, 50):.2f} "
               f"p95={pct(lat, 95):.2f} p99={pct(lat, 99):.2f} max={lat[-1]:.2f} (s)")
     if stats.ttfts:
         t = sorted(stats.ttfts)
         print(f"TTFT:           p50={pct(t, 50):.2f} p95={pct(t, 95):.2f} (s)")
 
-    # Нагрузочный прогон считается провальным при любой ошибке: под ожидаемой
-    # нагрузкой gateway обязан отвечать, а не отваливаться по таймауту/5xx.
+    # The load run counts as failed on any error: under the expected load the gateway is
+    # supposed to answer, not fall over with timeouts or 5xx.
     return 1 if stats.errors else 0
 
 

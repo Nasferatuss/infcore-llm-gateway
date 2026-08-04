@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Nasferatuss/infcore-llm-gateway/security/advisories/new
+    about: Report privately. Please do not open a public issue for a security defect.
+  - name: A bug in llama.cpp itself
+    url: https://github.com/ggml-org/llama.cpp/issues
+    about: infcore does not modify the engine — engine defects belong upstream.

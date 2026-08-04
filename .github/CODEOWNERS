@@ -1,0 +1,10 @@
+# Every change is reviewed by the maintainer.
+*                       @Nasferatuss
+
+# The authorization, audit and process-supervision layers carry the security
+# properties the README claims. Called out explicitly so a change here is never
+# reviewed as an ordinary one.
+/security/              @Nasferatuss
+/runtime/               @Nasferatuss
+/gateway/server.cpp     @Nasferatuss
+/deploy/                @Nasferatuss

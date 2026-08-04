@@ -1,6 +1,6 @@
-// infcore CLI — лицензия MIT (см. LICENSE).
-// Терминальный клиент к gateway: список моделей, переключение (admin), чат.
-// Адрес/ключ: флаги --url/--key либо env INFCORE_URL/INFCORE_KEY.
+// infcore CLI — MIT licence (see LICENSE).
+// A terminal client for the gateway: list models, toggle them (admin), chat.
+// Address and key come from --url/--key or from INFCORE_URL/INFCORE_KEY.
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -38,7 +38,7 @@ httplib::Headers auth(const Opts& o) {
     return {{"Authorization", "Bearer " + o.key}};
 }
 
-// Выполняет запрос, печатает тело при ошибке. Возвращает распарсенный JSON или null.
+// Performs the request and prints the body on error. Returns the parsed JSON, or null.
 json request(const Opts& o, const char* method, const std::string& path, const std::string& body) {
     httplib::Client cli(o.url);
     cli.set_read_timeout(300, 0);

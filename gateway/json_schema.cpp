@@ -1,4 +1,4 @@
-// infcore gateway — лицензия MIT (см. LICENSE).
+// infcore gateway — MIT licence (see LICENSE).
 #include "json_schema.hpp"
 
 #include <regex>
@@ -16,11 +16,11 @@ bool type_matches(const json& v, const std::string& t) {
     if (t == "boolean") return v.is_boolean();
     if (t == "integer") return v.is_number_integer();
     if (t == "number")  return v.is_number();
-    return true;   // неизвестный тип не валидируем
+    return true;   // an unknown type is not validated
 }
 
 const json* resolve_ref(const std::string& ref, const json& root) {
-    // Поддерживаем только локальные ссылки вида "#/$defs/Name".
+    // Only local references of the form "#/$defs/Name" are supported.
     const std::string pfx = "#/$defs/";
     if (ref.compare(0, pfx.size(), pfx) != 0) return nullptr;
     std::string name = ref.substr(pfx.size());
@@ -41,7 +41,7 @@ void validate(const json& inst, const json& schema, const json& root,
         const std::string t = schema.at("type").get<std::string>();
         if (!type_matches(inst, t)) {
             errs.push_back(P + ": expected type '" + t + "'");
-            return;   // дальше проверять бессмысленно
+            return;   // checking any further is pointless
         }
     }
 
@@ -64,7 +64,7 @@ void validate(const json& inst, const json& schema, const json& root,
             std::regex re(schema.at("pattern").get<std::string>());
             if (!std::regex_search(inst.get<std::string>(), re))
                 errs.push_back(P + ": does not match pattern");
-        } catch (const std::exception&) { /* некорректный pattern в схеме - пропускаем */ }
+        } catch (const std::exception&) { /* malformed pattern in the schema - skip it */ }
     }
 
     if (inst.is_array()) {

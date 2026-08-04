@@ -1,8 +1,8 @@
-// infcore gateway — лицензия MIT (см. LICENSE).
-// Минимальный валидатор JSON-Schema (подмножество draft 2020-12, которое реально
-// используется в gateway.schema.json): type, required, properties,
+// infcore gateway — MIT licence (see LICENSE).
+// A minimal JSON-Schema validator (the subset of draft 2020-12 actually used by
+// gateway.schema.json): type, required, properties,
 // additionalProperties:false, enum, items, minimum/maximum, minItems, pattern,
-// $ref ("#/$defs/..."). Без внешних зависимостей (offline-контур).
+// $ref ("#/$defs/..."). No external dependencies (offline deployment).
 #pragma once
 
 #include <string>
@@ -12,7 +12,7 @@
 
 namespace infcore {
 
-// Возвращает список человекочитаемых ошибок (пустой = инстанс валиден по схеме).
+// Returns a list of human-readable errors (empty = the instance is valid against the schema).
 std::vector<std::string> json_schema_validate(const nlohmann::json& instance,
                                               const nlohmann::json& schema);
 

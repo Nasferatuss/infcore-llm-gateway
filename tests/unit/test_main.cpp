@@ -1,5 +1,5 @@
-// infcore — лицензия MIT (см. LICENSE). Юнит-тесты слоя gateway (без движка/сети).
-// Минимальный assert-харнесс (без внешних зависимостей, offline).
+// infcore — MIT licence (see LICENSE). Unit tests for the gateway layer (no engine, no
+// network). A minimal assert harness with no external dependencies, offline.
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -41,7 +41,7 @@ static void test_rbac() {
     CHECK(!a.model_allowed("ghost", "bge"));
 
     Authorizer off;
-    off.set_enabled(false);                                           // RBAC выкл -> всё разрешено
+    off.set_enabled(false);                                           // RBAC off -> everything is allowed
     CHECK(off.allow("anyrole", "/whatever", "anymodel", r));
     CHECK(off.model_allowed("anyrole", "anymodel"));
 }
@@ -57,10 +57,10 @@ static void test_authn() {
     CHECK(au.verify("key-emb", out) && out.role == "emb");
     CHECK(!au.verify("wrong", out));
     CHECK(!au.verify("", out));
-    CHECK(!au.verify("key-admin-extra", out));   // не префиксное совпадение
+    CHECK(!au.verify("key-admin-extra", out));   // not a prefix match
 
     CHECK(parse_bearer("Bearer abc") == "abc");
-    CHECK(parse_bearer("bearer abc") == "abc");   // регистронезависимо
+    CHECK(parse_bearer("bearer abc") == "abc");   // case-insensitive
     CHECK(parse_bearer("BEARER abc") == "abc");
     CHECK(parse_bearer("Bearer ") == "");
     CHECK(parse_bearer("Bearer") == "");
@@ -68,7 +68,7 @@ static void test_authn() {
     CHECK(parse_bearer("") == "");
 }
 
-// --- json-schema валидатор ----------------------------------------------------
+// --- json-schema validator ----------------------------------------------------
 static const char* kSchema = R"({
   "type": "object", "additionalProperties": false,
   "required": ["name", "port"],
@@ -124,47 +124,47 @@ static void test_config() {
     try { infcore::load_config(write_tmp(valid)); } catch (...) { loaded = false; }
     CHECK(loaded);
 
-    // заглушечный ключ
+    // a placeholder key
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
       "security":{"rbac_enabled":false,"principals":[{"api_key":"change-me-x","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "models":[{"logical_name":"m","backend_url":"http://127.0.0.1:9"}]})"));
 
-    // vision без mmproj
+    // vision without an mmproj
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
       "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "runtime":{"llama_server_bin":"/bin/true"},
       "models":[{"logical_name":"v","gguf_path":"/tmp/v.gguf","modality":"vision"}]})"));
 
-    // enforce_no_egress + внешний нелокальный backend_url
+    // enforce_no_egress plus an external, non-local backend_url
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
       "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "offline":{"enforce_no_egress":true},
       "models":[{"logical_name":"e","backend_url":"http://8.8.8.8:1234"}]})"));
 
-    // роль principal'а не объявлена
+    // the principal's role is not declared
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
       "security":{"rbac_enabled":true,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"ghost"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "models":[{"logical_name":"m","backend_url":"http://127.0.0.1:9"}]})"));
 
-    // M1: обход egress-проверки через userinfo (реальный хост evil.com) -> отказ
+    // M1: bypassing the egress check through userinfo (the real host is evil.com) -> rejected
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
       "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "offline":{"enforce_no_egress":true},
       "models":[{"logical_name":"e","backend_url":"http://127.0.0.1@evil.com/"}]})"));
 
-    // M1: обход по префиксу строки (хостнейм начинается с "127."/"10.") -> отказ
+    // M1: bypass via a string prefix (a hostname starting with "127."/"10.") -> rejected
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
       "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}]},
       "offline":{"enforce_no_egress":true},
       "models":[{"logical_name":"e","backend_url":"http://127.0.0.1.evil.com:9/"}]})"));
 
-    // M1: легитимный локальный RFC1918-бэкенд по-прежнему грузится
+    // M1: a legitimate local RFC1918 backend still loads
     {
       bool ok = true;
       try { infcore::load_config(write_tmp(R"({"server":{"host":"127.0.0.1","port":8080},
@@ -176,7 +176,7 @@ static void test_config() {
       CHECK(ok);
     }
 
-    // rerank-модель валидируется как отдельная модальность
+    // a rerank model is validated as its own modality
     {
       bool ok = true;
       try { infcore::load_config(write_tmp(R"({"server":{"host":"127.0.0.1","port":8080},
@@ -188,7 +188,7 @@ static void test_config() {
       CHECK(ok);
     }
 
-    // audit.require=true не может сочетаться с sink=none
+    // audit.require=true cannot be combined with sink=none
     CHECK(load_throws(R"({"server":{"host":"127.0.0.1","port":8080},
       "security":{"rbac_enabled":false,"principals":[{"api_key":"0123456789abcdef01234567","subject":"a","role":"admin"}],
         "roles":[{"name":"admin","allow_models":["*"],"allow_endpoints":["*"]}],
@@ -201,7 +201,7 @@ static void test_config() {
         "roles":[{"name":"admin","allow_models":["missing"],"allow_endpoints":["*"]}]},
       "models":[{"logical_name":"m","backend_url":"http://127.0.0.1:9"}]})"));
 
-    // release integrity gate: sha256 + size_bytes для managed model
+    // release integrity gate: sha256 + size_bytes for a managed model
     {
       bool ok = true;
       try { infcore::load_config(write_tmp(R"({"server":{"host":"127.0.0.1","port":8080},

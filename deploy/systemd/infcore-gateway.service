@@ -1,12 +1,12 @@
-# infcore gateway - systemd unit для offline-контура.
-# ПРЕДВАРИТЕЛЬНО (один раз, от root):
-#   useradd -r -s /usr/sbin/nologin infcore          # сервисный пользователь
+# infcore gateway — a systemd unit for an offline deployment.
+# BEFOREHAND (once, as root):
+#   useradd -r -s /usr/sbin/nologin infcore          # the service user
 #   install -d -o infcore -g infcore /opt/infcore/bin /opt/infcore/config
-#   # положить бинари в /opt/infcore/bin, конфиг в /opt/infcore/config/gateway.yaml
-#   # каталог журнала /var/log/infcore создаёт сам systemd (LogsDirectory=, см. ниже)
-# Установка: cp в /etc/systemd/system/, затем systemctl daemon-reload && enable --now.
+#   # put the binaries in /opt/infcore/bin and the config in /opt/infcore/config/gateway.yaml
+#   # the journal directory /var/log/infcore is created by systemd itself (LogsDirectory=, below)
+# Install: cp into /etc/systemd/system/, then systemctl daemon-reload && enable --now.
 [Unit]
-Description=infcore gateway (OpenAI-совместимый шлюз к локальным LLM)
+Description=infcore gateway (OpenAI-compatible gateway to local LLMs)
 After=network.target
 Documentation=file:/opt/infcore/docs/DEPLOY.md
 
@@ -15,20 +15,20 @@ Type=simple
 User=infcore
 Group=infcore
 
-# Секреты (API-ключи через env:VAR в конфиге) подхватываются отсюда; файл опционален.
+# Secrets (API keys referenced as env:VAR in the config) are read from here; optional file.
 EnvironmentFile=-/etc/infcore/gateway.env
 
 ExecStart=/opt/infcore/bin/infcore_gateway /opt/infcore/config/gateway.yaml
 
-# Ротация audit-журнала: SIGHUP -> шлюз переоткрывает журнал по прежнему пути.
-# Дёргается из /etc/logrotate.d/infcore (postrotate: systemctl reload). БЕЗ этого
-# logrotate в режиме create оставил бы шлюз писать в переименованный файл, а новый
-# остался бы пустым - весь аудит утекал бы в архив молча.
-# Конфиг при этом НЕ перечитывается: смена ключей/моделей требует restart.
+# Audit journal rotation: SIGHUP -> the gateway reopens the journal at the same path.
+# Triggered from /etc/logrotate.d/infcore (postrotate: systemctl reload). WITHOUT this,
+# logrotate in create mode would leave the gateway writing to the renamed file while the new
+# one stayed empty — the whole audit trail would leak into the archive silently.
+# The config is NOT re-read: changing keys or models still requires a restart.
 ExecReload=/bin/kill -HUP $MAINPID
 
-# Gateway сам поднимает дочерние llama-server. control-group гарантирует, что при
-# остановке/перезапуске юнита будут убиты ВСЕ процессы (включая модели), без сирот.
+# The gateway starts child llama-server processes itself. control-group guarantees that
+# stopping or restarting the unit kills ALL of them (models included), leaving no orphans.
 KillMode=control-group
 KillSignal=SIGTERM
 TimeoutStopSec=30
@@ -36,7 +36,7 @@ TimeoutStopSec=30
 Restart=on-failure
 RestartSec=2
 
-# Базовое усиление. /dev оставлен доступным для GPU (NVIDIA); audit-журнал - на запись.
+# Baseline hardening. /dev stays accessible for the GPU (NVIDIA); the audit journal is writable.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -56,8 +56,8 @@ AmbientCapabilities=
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-# systemd создаёт /var/log/infcore с владельцем User= (mode 0750) до старта сервиса -
-# отдельный mkdir/chown не нужен; каталог автоматически в ReadWritePaths.
+# systemd creates /var/log/infcore owned by User= (mode 0750) before the service starts, so
+# no separate mkdir/chown is needed; the directory is automatically in ReadWritePaths.
 LogsDirectory=infcore
 LogsDirectoryMode=0750
 ReadWritePaths=/var/log/infcore
@@ -65,8 +65,8 @@ LimitNOFILE=65536
 TasksMax=512
 UMask=0077
 
-# Offline-инвариант на уровне ядра: запрещаем весь egress, кроме loopback.
-# Клиенты ходят на gateway - добавьте их подсеть в IPAddressAllow (напр. 10.0.0.0/8).
+# The offline invariant enforced by the kernel: all egress is denied except loopback.
+# Clients connect to the gateway — add their subnet to IPAddressAllow (e.g. 10.0.0.0/8).
 IPAddressDeny=any
 IPAddressAllow=localhost
 

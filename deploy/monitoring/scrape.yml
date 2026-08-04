@@ -1,10 +1,10 @@
-# infcore — сбор метрик. Формат Prometheus; VictoriaMetrics (vmagent/-promscrape.config)
-# понимает его как есть.
+# infcore — metrics collection. Prometheus format; VictoriaMetrics
+# (vmagent/-promscrape.config) reads it as-is.
 #
-# /metrics шлюз отдаёт БЕЗ авторизации (он рассчитан на loopback), поэтому наружу
-# его выпускать нельзя: счётчики ошибок и список endpoint'ов — операционная разведка.
-# Скрейпить строго внутренним адресом либо через reverse-proxy с allow-списком
-# (см. deploy/angie/infcore.conf, location = /metrics).
+# The gateway serves /metrics WITHOUT authentication (it is meant for loopback), so it must
+# not be exposed outward: error counters and the endpoint list are operational intelligence.
+# Scrape it strictly over an internal address, or through a reverse proxy with an allowlist
+# (see deploy/angie/infcore.conf, location = /metrics).
 
 global:
   scrape_interval: 15s
@@ -15,7 +15,7 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets:
-          - 127.0.0.1:8080        # <- адрес шлюза во внутренней сети контура
+          - 127.0.0.1:8080        # <- the gateway's address on the internal network
         labels:
           service: infcore-gateway
-          contour: prod
+          environment: prod

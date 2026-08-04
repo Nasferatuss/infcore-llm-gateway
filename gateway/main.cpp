@@ -1,6 +1,6 @@
-// infcore gateway — лицензия MIT (см. LICENSE).
-// Точка входа: загрузка конфига → запуск OpenAI-совместимого gateway (control-plane
-// перед бэкендами llama-server). Никаких исходящих соединений за пределы контура.
+// infcore gateway — MIT licence (see LICENSE).
+// Entry point: load the config, then start the OpenAI-compatible gateway (a control plane
+// in front of llama-server backends). No outbound connections leave the deployment.
 #include <cstdio>
 #include <cstring>
 #include <exception>

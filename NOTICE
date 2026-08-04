@@ -1,18 +1,18 @@
 infcore
-Copyright (c) 2026 Max Terentjev. Распространяется по лицензии MIT (см. LICENSE).
+Copyright (c) 2026 Max Terentjev. Distributed under the MIT licence (see LICENSE).
 
 ==============================================================================
-Продукт СОЗДАН НА БАЗЕ ПО с открытым исходным кодом и НЕ скрывает происхождение.
+This product is BUILT ON open-source software and does not hide its provenance.
 ==============================================================================
 
-Движок, поверх которого работает этот слой, — используется по лицензии:
+The engine this layer runs on top of is used under its own licence:
   llama.cpp / ggml — Copyright (c) 2023-2026 The ggml authors — MIT
-  Источник: https://github.com/ggml-org/llama.cpp
-  Зафиксированный базовый коммит: e8ecce53b872257e173d9d491a57e7a09c7cd8cb (2026-06-25)
+  Source: https://github.com/ggml-org/llama.cpp
+  Pinned base commit: e8ecce53b872257e173d9d491a57e7a09c7cd8cb (2026-06-25)
 
-Код движка в состав этого репозитория не входит: infcore собирается как слой
-поверх дерева llama.cpp и общается с ним по HTTP (см. README, «Сборка»).
+The engine's code is not part of this repository: infcore builds as a layer on top of a
+llama.cpp tree and talks to it over HTTP (see README, "Build").
 
-Бандл-зависимости движка: cpp-httplib (MIT), nlohmann/json (MIT),
+Dependencies bundled with the engine: cpp-httplib (MIT), nlohmann/json (MIT),
 stb (MIT/Public Domain), miniaudio (MIT/Public Domain), sheredom (Unlicense).
-Полные тексты: THIRD_PARTY_LICENSES/ и sbom.cdx.json.
+Full texts: THIRD_PARTY_LICENSES/ and sbom.cdx.json.

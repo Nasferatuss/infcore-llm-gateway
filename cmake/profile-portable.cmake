@@ -1,24 +1,25 @@
-# infcore — портируемый профиль сборки для изолированного контура (cache-init).
-# Применяется так:  cmake -S infcore -B build -C infcore/cmake/profile-portable.cmake
-# Задаёт флаги движка ДО конфигурации llama.cpp. Сами файлы апстрима не меняются.
+# infcore — a portable build profile for an isolated deployment (cache-init).
+# Used as:  cmake -S infcore -B build -C infcore/cmake/profile-portable.cmake
+# It sets the engine flags BEFORE llama.cpp is configured. Upstream files are not modified.
 
-# --- Бэкенды ggml: оставляем cpu (всегда) + cuda + vulkan ---------------------
+# --- ggml backends: keep cpu (always) + cuda + vulkan -------------------------
 set(GGML_CUDA      ON  CACHE BOOL "" FORCE)
 set(GGML_VULKAN    ON  CACHE BOOL "" FORCE)
 
-# CUDA-архитектуры: НЕ полагаемся на дефолт "native" (llama.cpp его выставляет при
-# CUDA>=11.6 + CMake>=3.24). "native" требует ВИДИМЫЙ GPU на стадии configure - в
-# `docker build` GPU нет, и конфигурация падает. Пинуем реальный набор архитектур:
+# CUDA architectures: we do NOT rely on the "native" default (llama.cpp sets it with
+# CUDA>=11.6 + CMake>=3.24). "native" requires a VISIBLE GPU at configure time, and there is
+# no GPU inside `docker build`, so configuration fails. Pin a concrete architecture set:
 #   75=Turing(T4/2080) 80=Ampere(A100) 86=Ampere(A10/3090) 89=Ada(L40/4090) 90=Hopper(H100).
-# Урезать/расширить под парк GPU: -DCMAKE_CUDA_ARCHITECTURES=86 (быстрее сборка, меньше образ).
+# Narrow or widen it for your GPU fleet: -DCMAKE_CUDA_ARCHITECTURES=86 (faster build,
+# smaller image).
 set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90" CACHE STRING "" FORCE)
 
-# GGML_NATIVE=OFF: не завязываем бинарь на -march=native хоста сборки. Иначе образ,
-# собранный на одной CPU-микроархитектуре, падал бы с SIGILL на другой в парке.
-# Для сборки строго под конкретный сервер можно вернуть -DGGML_NATIVE=ON.
+# GGML_NATIVE=OFF: the binary is not tied to -march=native of the build host. Otherwise an
+# image built on one CPU microarchitecture would die with SIGILL on another in the fleet.
+# To build strictly for one specific server you can put -DGGML_NATIVE=ON back.
 set(GGML_NATIVE    OFF CACHE BOOL "" FORCE)
 
-# Выключаем всё, что не под наше железо / нарушает offline:
+# Turn off everything that does not match our hardware or breaks the offline invariant:
 set(GGML_METAL     OFF CACHE BOOL "" FORCE)
 set(GGML_SYCL      OFF CACHE BOOL "" FORCE)
 set(GGML_OPENCL    OFF CACHE BOOL "" FORCE)
@@ -31,29 +32,31 @@ set(GGML_ZDNN      OFF CACHE BOOL "" FORCE)
 set(GGML_ZENDNN    OFF CACHE BOOL "" FORCE)
 set(GGML_VIRTGPU   OFF CACHE BOOL "" FORCE)
 set(GGML_HIP       OFF CACHE BOOL "" FORCE)
-set(GGML_RPC       OFF CACHE BOOL "" FORCE)   # offline: без сетевого RPC-бэкенда
-# BLAS — опционально для CPU-ускорения; по умолчанию off
+set(GGML_RPC       OFF CACHE BOOL "" FORCE)   # offline: no networked RPC backend
+# BLAS is optional for CPU acceleration; off by default
 set(GGML_BLAS      OFF CACHE BOOL "" FORCE)
 
-# --- Состав сборки llama.cpp --------------------------------------------------
-# Сервер и mtmd НУЖНЫ (gateway строится на tools/server; mtmd — мультимодальность).
+# --- What of llama.cpp gets built ---------------------------------------------
+# The server and mtmd ARE required (the gateway builds on tools/server; mtmd provides
+# multimodality).
 set(LLAMA_BUILD_SERVER   ON  CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS    ON  CACHE BOOL "" FORCE)
-# Примеры/тесты апстрима в рантайм-сборке не нужны:
+# Upstream examples and tests are not needed in a runtime build:
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 
-# Web UI: НЕ встраивать и НЕ качать из HuggingFace (offline + нет браузерного UI;
-# наружу работает наш gateway). Сервер собирается со стаб-ui.h, llama-ui пустой.
-# Каталог tools/ui НЕ удаляем физически: server-http.cpp жёстко #include "ui.h"
-# и зовёт llama_ui_*; удаление сломало бы сборку сервера и drop-in обновления.
+# Web UI: neither embedded NOR downloaded from HuggingFace (offline, and there is no browser
+# UI; our gateway is what faces outward). The server is built against a stub ui.h and
+# llama-ui is empty. The tools/ui directory is NOT physically removed: server-http.cpp has a
+# hard #include "ui.h" and calls llama_ui_*, so deleting it would break both the server build
+# and drop-in updates.
 set(LLAMA_BUILD_UI        OFF CACHE BOOL "" FORCE)
 set(LLAMA_USE_PREBUILT_UI OFF CACHE BOOL "" FORCE)
-# Унифицированный desktop-бинарь (app/, содержал сетевой download.cpp) не собираем.
+# The unified desktop binary (app/, which contained a networked download.cpp) is not built.
 set(LLAMA_BUILD_APP       OFF CACHE BOOL "" FORCE)
 
 set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 
-# Release/runtime artifact должен быть самодостаточным: не полагаемся на то, что
-# libllama.so/libggml*.so попадут рядом с бинарями в Docker/systemd install.
+# The release/runtime artifact must be self-contained: we do not rely on
+# libllama.so/libggml*.so landing next to the binaries in a Docker/systemd install.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)

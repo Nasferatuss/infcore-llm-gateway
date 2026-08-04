@@ -1,5 +1,5 @@
-// infcore — корп. лицензия. Аутентификация: статические API-ключи внутреннего
-// контура (mTLS/OIDC — на будущее). Без обращений к внешним провайдерам.
+// infcore — MIT licence (see LICENSE). Authentication: static API keys for an internal
+// deployment (mTLS/OIDC are future work). No calls to external providers.
 #pragma once
 
 #include <string>
@@ -8,17 +8,17 @@
 namespace infcore {
 
 struct Principal {
-    std::string subject;   // кто (для аудита)
-    std::string role;      // роль (для RBAC)
+    std::string subject;   // who (for the audit journal)
+    std::string role;      // role (for RBAC)
 };
 
-// Сопоставляет bearer-токен с принципалом. Источник истины - конфиг (offline).
-// Сравнение ключей constant-time и без раннего выхода по списку, чтобы не
-// давать timing-side-channel (ни длина совпадения, ни номер ключа).
+// Maps a bearer token to a principal. The source of truth is the config (offline).
+// Key comparison is constant-time and does not exit the list early, so no timing side
+// channel leaks either the length of the match or the position of the key.
 class Authenticator {
 public:
     void add_key(const std::string& api_key, const Principal& p);
-    bool verify(const std::string& token, Principal& out) const;  // token без префикса "Bearer "
+    bool verify(const std::string& token, Principal& out) const;  // token without the "Bearer " prefix
     bool empty() const { return keys_.empty(); }
 
 private:
@@ -26,7 +26,7 @@ private:
     std::vector<Entry> keys_;
 };
 
-// Извлекает токен из заголовка Authorization ("Bearer <token>"); пусто при ошибке.
+// Extracts the token from the Authorization header ("Bearer <token>"); empty on failure.
 std::string parse_bearer(const std::string& header);
 
 }  // namespace infcore

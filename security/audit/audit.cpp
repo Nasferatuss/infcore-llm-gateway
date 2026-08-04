@@ -1,4 +1,4 @@
-// infcore — корп. лицензия.
+// infcore — MIT licence (see LICENSE).
 #include "audit/audit.h"
 
 #include <cerrno>
@@ -33,30 +33,30 @@ AuditLog::~AuditLog() {
     }
     cv_work_.notify_all();
     cv_commit_.notify_all();
-    if (writer_.joinable()) writer_.join();   // дописывает остаток очереди перед выходом
+    if (writer_.joinable()) writer_.join();   // flushes the rest of the queue before exiting
     if (fd_ >= 0) ::close(fd_);
 }
 
 bool AuditLog::open(const std::string& path) {
-    // O_CLOEXEC: дочерние llama-server не должны наследовать fd журнала.
+    // O_CLOEXEC: the child llama-server processes must not inherit the journal fd.
     fd_ = ::open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0640);
     if (fd_ < 0) return false;
-    path_ = path;   // до старта писателя: дальше path_ читает только он
+    path_ = path;   // before the writer starts: from here on only the writer reads path_
     writer_ = std::thread([this] { writer_loop(); });
     return true;
 }
 
-// Переоткрытие журнала после ротации. Вызывается ТОЛЬКО из потока-писателя: fd_
-// пишется/читается без мьютекса, и писатель — его единственный владелец после open().
+// Reopens the journal after rotation. Called ONLY from the writer thread: fd_ is read and
+// written without a mutex, and the writer is its sole owner once open() has returned.
 void AuditLog::reopen_if_requested() {
     if (!reopen_requested_.exchange(false, std::memory_order_acq_rel)) return;
 
     const int nfd = ::open(path_.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0640);
     if (nfd < 0) {
-        // Осознанно НЕ уходим в fail-closed: прежний fd жив, события продолжают
-        // фиксироваться с fsync (пусть и в уже переименованный файл), т.е. инвариант
-        // «ни один запрос не остаётся без записи» цел. Ронять трафик из-за неудачной
-        // ротации значило бы лечить хуже болезни. Ops видит счётчик и stderr.
+        // Deliberately NOT failing closed here: the previous fd is still alive and events
+        // keep being committed with fsync (into the already-renamed file), so the invariant
+        // "no request goes unrecorded" holds. Dropping traffic because a rotation failed
+        // would be a cure worse than the disease. Operators see the counter and stderr.
         reopen_failures_.fetch_add(1, std::memory_order_relaxed);
         std::fprintf(stderr,
             "infcore: audit: could not reopen journal '%s' (%s); still writing to "
@@ -95,19 +95,19 @@ void AuditLog::log(const AuditEvent& e) {
     line.push_back('\n');
 
     std::unique_lock<std::mutex> lock(mu_);
-    if (stop_ || writer_failed_) return;   // писатель мёртв -> не залипаем навсегда
+    if (stop_ || writer_failed_) return;   // the writer is dead -> do not block forever
     const unsigned long long seq = ++enqueued_seq_;
     queue_.push_back(std::move(line));
     cv_work_.notify_one();
-    // Ждём, пока наша запись зафиксирована на диске (делим fsync с соседями по батчу).
-    // Очередь при этом ограничена числом одновременных запросов (каждый продьюсер
-    // блокируется до коммита), так что расти неограниченно не может.
+    // Wait until our line is committed to disk (sharing the fsync with the rest of the
+    // batch). The queue is bounded by the number of concurrent requests — every producer
+    // blocks until commit — so it cannot grow without limit.
     cv_commit_.wait(lock, [&] { return committed_seq_ >= seq || writer_failed_ || stop_; });
 }
 
-// Поток-писатель: спит до появления работы, затем ЗАБИРАЕТ ВСЮ очередь одним
-// батчем, пишет её и делает один fsync -> group-commit. После fsync поднимает
-// committed_seq_ и будит всех ждущих продьюсеров этого батча.
+// The writer thread: sleeps until there is work, then TAKES THE WHOLE queue as one batch,
+// writes it and issues a single fsync — group commit. After the fsync it advances
+// committed_seq_ and wakes every producer waiting on that batch.
 void AuditLog::writer_loop() {
     std::unique_lock<std::mutex> lock(mu_);
     for (;;) {
@@ -117,12 +117,12 @@ void AuditLog::writer_loop() {
             continue;
         }
         std::deque<std::string> batch;
-        batch.swap(queue_);                       // забрали всё -> один fsync на всех
+        batch.swap(queue_);                       // took everything -> one fsync for all of it
         const unsigned long long upto = enqueued_seq_;
         lock.unlock();
 
-        // Ротация: переоткрываем ДО записи батча, чтобы события ушли уже в новый
-        // файл. Здесь fd_ гарантированно никем не используется.
+        // Rotation: reopen BEFORE writing the batch so the events land in the new file.
+        // At this point fd_ is guaranteed to be unused by anyone else.
         reopen_if_requested();
 
         bool ok = true;
@@ -132,8 +132,8 @@ void AuditLog::writer_loop() {
             while (off < n) {
                 ssize_t w = ::write(fd_, line.data() + off, n - off);
                 if (w < 0) {
-                    if (errno == EINTR) continue;  // повтор, а не потеря записи
-                    werr = errno; ok = false; break;  // фатальная I/O-ошибка
+                    if (errno == EINTR) continue;  // retry, rather than lose the record
+                    werr = errno; ok = false; break;  // fatal I/O error
                 }
                 off += w;
             }
@@ -145,17 +145,18 @@ void AuditLog::writer_loop() {
         if (ok) {
             committed_seq_ = upto;
         } else {
-            writer_failed_ = true;   // разблокируем всех ждущих и больше не блокируем log()
+            writer_failed_ = true;   // release every waiter and stop blocking log() from now on
             failed_.store(true, std::memory_order_release);
-            // Громко: инвариант «нет трафика без аудита» иначе деградировал бы молча.
-            // Шлюз, увидев failed(), начнёт fail-closed (503) при audit.require=true.
+            // Loudly: otherwise the "no traffic without audit" invariant would degrade in
+            // silence. Once the gateway sees failed() it fails closed (503) whenever
+            // audit.require=true.
             std::fprintf(stderr,
                 "infcore: CRITICAL: audit journal write failed (%s); further events are "
                 "NOT recorded. With audit.require=true the gateway stops serving traffic.\n",
                 std::strerror(werr));
         }
         cv_commit_.notify_all();
-        if (writer_failed_) return;  // журнал сломан; продьюсеры увидят writer_failed_
+        if (writer_failed_) return;  // the journal is broken; producers will see writer_failed_
     }
 }
 

@@ -1,7 +1,7 @@
-// infcore runtime — лицензия MIT (см. LICENSE).
-// Lazy-supervisor бэкендов: по требованию поднимает дочерние процессы llama-server
-// для управляемых моделей (backend_url пуст), гасит их по простою. Модели с явным
-// backend_url считаются внешними и здесь не управляются.
+// infcore runtime — MIT licence (see LICENSE).
+// A lazy backend supervisor: it starts child llama-server processes on demand for managed
+// models (those with an empty backend_url) and shuts them down when idle. Models with an
+// explicit backend_url are treated as external and are not managed here.
 #pragma once
 
 #include <sys/types.h>
@@ -20,10 +20,10 @@ namespace infcore {
 class BackendSupervisor {
 public:
     struct Options {
-        std::string llama_server_bin;          // путь к нашему llama-server (из сборки)
-        int port_range_start  = 8100;          // откуда раздаются локальные порты
-        int idle_timeout_ms   = 300000;        // простой до выгрузки
-        int startup_timeout_ms = 120000;       // ожидание /health при старте
+        std::string llama_server_bin;          // path to our llama-server (from the build)
+        int port_range_start  = 8100;          // where local ports are handed out from
+        int idle_timeout_ms   = 300000;        // idle time before unloading
+        int startup_timeout_ms = 120000;       // how long to wait for /health at start-up
         std::string backend_token_path = "/dev/urandom";
         int max_loaded_models = 0;             // 0 = unlimited
         int max_parallel_starts = 1;           // admission control for expensive loads
@@ -35,60 +35,62 @@ public:
     BackendSupervisor(const BackendSupervisor&) = delete;
     BackendSupervisor& operator=(const BackendSupervisor&) = delete;
 
-    // Гарантирует, что управляемый бэкенд для модели поднят и здоров.
-    // Возвращает базовый URL бэкенда либо пустую строку (err заполнен).
-    // Блокирует на время старта; параллельные вызовы для одной модели ждут один старт.
+    // Guarantees that the managed backend for this model is up and healthy.
+    // Returns the backend's base URL, or an empty string (with err filled in).
+    // Blocks for the duration of the start-up; concurrent calls for the same model wait on
+    // a single start.
     std::string ensure_ready(const ModelEntry& e, std::string& err);
 
-    // Per-boot ключ, с которым поднимаются дочерние llama-server (--api-key).
-    // Прокси добавляет его в Authorization к запросам управляемых бэкендов.
+    // The per-boot key the child llama-server processes are started with (--api-key).
+    // The proxy adds it to the Authorization header of requests to managed backends.
     const std::string& api_key() const { return api_key_; }
 
-    // Учёт активных запросов: reaper не гасит бэкенд с active > 0 (иначе оборвёт stream).
+    // In-flight request accounting: the reaper never stops a backend with active > 0
+    // (doing so would cut a stream off mid-flight).
     void acquire(const std::string& logical_name);
     void release(const std::string& logical_name);
 
-    // Немедленно погасить управляемый бэкенд модели (напр. при disable через /admin).
-    // Если есть активные запросы - гасим сразу после их завершения (не рвём stream).
-    // No-op для внешних/не запущенных моделей.
+    // Immediately stop a model's managed backend (e.g. on disable via /admin).
+    // If there are in-flight requests it is stopped as soon as they finish (streams are
+    // never cut). A no-op for external or not-yet-started models.
     void stop(const std::string& logical_name);
 
-    // Сколько бэкендов сейчас подняты (Ready/Starting) - для gauge на /metrics.
+    // How many backends are currently up (Ready/Starting) - for the /metrics gauge.
     int loaded_count() const;
 
 private:
-    // Stopping: процесс получает SIGTERM и дожёвывается БЕЗ удержания mu_ (иначе
-    // 5-секундное ожидание блокировало бы все остальные модели). Параллельные
-    // ensure_ready для этой же модели ждут на b.cv, пока не станет Stopped.
+    // Stopping: the process is sent SIGTERM and reaped WITHOUT holding mu_ (otherwise the
+    // five-second wait would block every other model). Concurrent ensure_ready calls for
+    // the same model wait on b.cv until the state becomes Stopped.
     enum class State { Stopped, Starting, Ready, Failed, Stopping };
 
     struct Backend {
         State        state = State::Stopped;
         pid_t        pid   = -1;
-        int          port  = 0;          // назначается перед стартом; сбрасывается при сбое
+        int          port  = 0;          // assigned before start-up; reset on failure
         std::string  url;
         std::string  last_error;
         long long    last_used_ms = 0;
-        long long    retry_after_ms = 0; // backoff: не пересоздавать раньше этого времени
+        long long    retry_after_ms = 0; // backoff: do not respawn before this timestamp
         int          fail_count = 0;
         int          active = 0;
-        bool         stop_requested = false; // /admin disable: погасить, как только active==0
+        bool         stop_requested = false; // /admin disable: stop as soon as active==0
         std::condition_variable cv;
     };
 
-    Backend& get_or_create(const std::string& logical_name);  // mu_ удерживается вызывающим
-    int loaded_count_locked() const;           // Ready/Starting models, mu_ удерживается вызывающим
-    bool spawn(const ModelEntry& e, int port, pid_t& out_pid, std::string& err);  // fork+exec, без блокировки mu_
-    bool wait_health(int port);          // поллит /health до startup_timeout_ms
-    // SIGTERM -> SIGKILL, waitpid. Освобождает переданный lock на время ожидания
-    // (state=Stopping), чтобы не держать mu_ до 5 c. lock возвращается захваченным.
+    Backend& get_or_create(const std::string& logical_name);  // mu_ is held by the caller
+    int loaded_count_locked() const;           // Ready/Starting models, mu_ is held by the caller
+    bool spawn(const ModelEntry& e, int port, pid_t& out_pid, std::string& err);  // fork+exec, mu_ not held
+    bool wait_health(int port);          // polls /health for up to startup_timeout_ms
+    // SIGTERM -> SIGKILL, waitpid. Releases the lock passed in for the duration of the wait
+    // (state=Stopping) so mu_ is not held for up to 5 s. The lock is returned re-acquired.
     void stop_backend(Backend& b, std::unique_lock<std::mutex>& lock);
     void reaper_loop();
     long long now_ms();
 
     Options     opt_;
-    std::string api_key_;                // сгенерирован в конструкторе (per-boot)
-    mutable std::mutex  mu_;             // mutable: loaded_count() const читает состояние под ним
+    std::string api_key_;                // generated in the constructor (per boot)
+    mutable std::mutex  mu_;             // mutable: loaded_count() const reads state under it
     std::map<std::string, std::unique_ptr<Backend>> backends_;
     int         next_port_;
     int         starts_in_flight_ = 0;

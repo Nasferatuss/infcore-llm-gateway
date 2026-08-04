@@ -1,4 +1,4 @@
-// infcore gateway — лицензия MIT (см. LICENSE).
+// infcore gateway — MIT licence (see LICENSE).
 #include "server.hpp"
 
 #include <atomic>
@@ -31,13 +31,13 @@ GatewayServer::GatewayServer(GatewayConfig cfg) : cfg_(std::move(cfg)) {
     opt.max_parallel_starts = cfg_.max_parallel_starts;
     supervisor_ = std::make_unique<BackendSupervisor>(opt);
 
-    // RBAC: роли из конфига; principals -> ключи.
+    // RBAC: roles come from the config; principals map to keys.
     rbac_.set_enabled(cfg_.rbac_enabled);
     bool has_admin_role = false;
     for (const auto& r : cfg_.roles) { rbac_.add_role(r); if (r.name == "admin") has_admin_role = true; }
     for (const auto& ap : cfg_.principals) authn_.add_key(ap.api_key, ap.principal);
 
-    // Обратная совместимость: плоские api_keys = principal'ы с ролью admin.
+    // Backwards compatibility: flat api_keys become principals with the admin role.
     if (!cfg_.api_keys.empty()) {
         std::fprintf(stderr,
             "infcore: WARNING: security.api_keys (legacy) grant the admin role with subject "
@@ -50,8 +50,9 @@ GatewayServer::GatewayServer(GatewayConfig cfg) : cfg_(std::move(cfg)) {
         for (const auto& k : cfg_.api_keys) authn_.add_key(k, Principal{"legacy", "admin"});
     }
 
-    // Аудит обязателен для контура: если журнал (sink=file) не открылся, НЕ отдаём
-    // трафик с молча выключенным аудитом - fail-fast (пока audit.require не снят явно).
+    // Audit is mandatory for this deployment: if the journal (sink=file) did not open,
+    // do NOT serve traffic with audit silently off — fail fast (unless audit.require is
+    // explicitly cleared).
     if (cfg_.audit_sink == "file" && !audit_.open(cfg_.audit_path)) {
         std::string msg = "infcore: could not open the audit journal: " + cfg_.audit_path +
             " (check that the directory exists and is writable by the service user)";
@@ -99,10 +100,10 @@ void GatewayServer::audit_event(const Principal& pr, const std::string& client_i
     ev.completion_tokens = completion_tokens;
     ev.total_tokens = total_tokens;
 
-    // Метрики снимаем здесь: через audit_event проходит КАЖДЫЙ исход запроса
-    // (allow/deny/error), поэтому одна врезка покрывает все пути без риска
-    // забыть счётчик в новой ветке. Endpoint берём как есть - это фиксированный
-    // набор маршрутов, а не пользовательский ввод, взрыва кардинальности нет.
+    // Metrics are taken here: EVERY request outcome (allow/deny/error) goes through
+    // audit_event, so a single hook covers all paths and no new branch can forget its
+    // counter. The endpoint is used as-is — it is a fixed set of routes, not user input,
+    // so there is no cardinality blow-up.
     inc("requests_total{endpoint=\"" + endpoint + "\",decision=\"" + std::string(decision) + "\"}");
     if (latency_ms >= 0) {
         std::lock_guard<std::mutex> lock(metrics_mu_);
@@ -113,9 +114,9 @@ void GatewayServer::audit_event(const Principal& pr, const std::string& client_i
 }
 
 namespace {
-// Самый правый элемент X-Forwarded-For. Именно правый, а не левый: nginx/Angie в
-// proxy_add_x_forwarded_for ДОПИСЫВАЮТ своего peer'а справа, тогда как левые
-// элементы пришли от клиента и подделываются тривиально ("X-Forwarded-For: 8.8.8.8").
+// The rightmost element of X-Forwarded-For. Rightmost, not leftmost: nginx/Angie's
+// proxy_add_x_forwarded_for APPENDS its own peer on the right, whereas the left-hand
+// elements arrived from the client and are trivially forged ("X-Forwarded-For: 8.8.8.8").
 std::string rightmost_xff(const std::string& v) {
     const auto end = v.find_last_not_of(" \t");
     if (end == std::string::npos) return {};
@@ -127,14 +128,14 @@ std::string rightmost_xff(const std::string& v) {
 }
 }  // namespace
 
-// Реальный IP клиента для аудита. Без этого за TLS-прокси КАЖДАЯ запись журнала
-// получала бы client_ip=127.0.0.1 (peer'ом всегда оказывается сам прокси).
+// The client's real IP for the audit journal. Without this, behind a TLS proxy EVERY
+// journal record would carry client_ip=127.0.0.1 (the peer is always the proxy itself).
 //
-// Доверяем заголовкам ТОЛЬКО если запрос пришёл с адреса из trusted_proxies:
-// иначе клиент подделывает себе IP в аудите одним лишним заголовком. Список пуст
-// по умолчанию -> поведение прежнее (всегда peer соединения).
+// Headers are trusted ONLY when the request came from an address in trusted_proxies:
+// otherwise a client forges its own audited IP with one extra header. The list is empty
+// by default -> behaviour is unchanged (always the connection peer).
 std::string GatewayServer::client_ip_of(const httplib::Request& req) const {
-    const std::string peer = req.remote_addr;   // единственное место, где берём peer напрямую
+    const std::string peer = req.remote_addr;   // the only place the peer is read directly
     if (cfg_.trusted_proxies.empty()) return peer;
 
     bool trusted = false;
@@ -142,8 +143,8 @@ std::string GatewayServer::client_ip_of(const httplib::Request& req) const {
         if (cidr_contains_v4(cidr, peer)) { trusted = true; break; }
     if (!trusted) return peer;
 
-    // X-Real-IP прокси ЗАДАЁТ (proxy_set_header), затирая клиентское значение,
-    // поэтому подделать его нельзя - предпочитаем его.
+    // The proxy SETS X-Real-IP (proxy_set_header), overwriting whatever the client sent,
+    // so it cannot be forged — prefer it.
     const std::string real = req.get_header_value("X-Real-IP");
     if (!real.empty()) return real;
 
@@ -159,7 +160,7 @@ long GatewayServer::get_counter(const std::string& key) {
     std::lock_guard<std::mutex> lock(metrics_mu_);
     return counters_[key].load(std::memory_order_relaxed);
 }
-// Границы гистограммы латентности (сек).
+// Latency histogram bounds (seconds).
 const double GatewayServer::LatencyHist::bounds[GatewayServer::LatencyHist::NBOUNDS] = {
     0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0
 };
@@ -167,7 +168,7 @@ const double GatewayServer::LatencyHist::bounds[GatewayServer::LatencyHist::NBOU
 void GatewayServer::LatencyHist::observe(double seconds) {
     size_t i = 0;
     while (i < NBOUNDS && seconds > bounds[i]) ++i;
-    ++buckets[i];          // i == NBOUNDS -> корзина +Inf
+    ++buckets[i];          // i == NBOUNDS -> the +Inf bucket
     ++count;
     sum_seconds += seconds;
 }
@@ -177,9 +178,9 @@ std::string GatewayServer::render_metrics() {
     std::ostringstream os;
     os.setf(std::ios::fixed);
 
-    // Формат Prometheus/OpenMetrics: HELP/TYPE обязательны для осмысленного
-    // отображения; без них всё приезжает как untyped и rate()/histogram_quantile()
-    // на такие ряды не построить.
+    // Prometheus/OpenMetrics format: HELP/TYPE are required for the series to render
+    // meaningfully; without them everything arrives as untyped and rate() /
+    // histogram_quantile() cannot be applied.
     os << "# HELP infcore_gateway_errors_total Gateway errors by type.\n"
        << "# TYPE infcore_gateway_errors_total counter\n";
     for (auto& kv : counters_) {
@@ -196,7 +197,7 @@ std::string GatewayServer::render_metrics() {
            << kv.second.load(std::memory_order_relaxed) << "\n";
     }
 
-    // Латентность: без неё деградацию под нагрузкой видно только по жалобам.
+    // Latency: without it, degradation under load is only visible through complaints.
     os << "# HELP infcore_gateway_request_duration_seconds Request latency (including backend cold start).\n"
        << "# TYPE infcore_gateway_request_duration_seconds histogram\n";
     unsigned long long cum = 0;
@@ -212,15 +213,17 @@ std::string GatewayServer::render_metrics() {
     os << "infcore_gateway_request_duration_seconds_sum " << hist_.sum_seconds << "\n"
        << "infcore_gateway_request_duration_seconds_count " << hist_.count << "\n";
 
-    // Живость аудита. audit_failed=1 -> при audit.require=true шлюз уже отдаёт 503
-    // на весь трафик: это алерт «сервис лежит», а не «что-то подозрительное».
+    // Audit liveness. audit_failed=1 means that, with audit.require=true, the gateway is
+    // already returning 503 for all traffic: this is a "service is down" alert, not a
+    // "something looks suspicious" one.
     os << "# HELP infcore_gateway_audit_failed The audit journal writer failed fatally (1) - traffic is cut fail-closed.\n"
        << "# TYPE infcore_gateway_audit_failed gauge\n"
        << "infcore_gateway_audit_failed " << (audit_.failed() ? 1 : 0) << "\n";
     os << "# HELP infcore_gateway_audit_reopens_total Journal reopens on SIGHUP (rotation).\n"
        << "# TYPE infcore_gateway_audit_reopens_total counter\n"
        << "infcore_gateway_audit_reopens_total " << audit_.reopens() << "\n";
-    // >0 означает: ротация не состоялась, журнал пишется в переименованный файл.
+    // >0 means rotation did not take effect and the journal is being written to the
+    // renamed file.
     os << "# HELP infcore_gateway_audit_reopen_failures_total Failed journal reopens (rotation is not actually working).\n"
        << "# TYPE infcore_gateway_audit_reopen_failures_total counter\n"
        << "infcore_gateway_audit_reopen_failures_total " << audit_.reopen_failures() << "\n";
@@ -258,8 +261,8 @@ bool GatewayServer::allow_rate(const Principal& pr, std::string& reason) {
 // --- helpers -----------------------------------------------------------------
 namespace {
 
-// OpenAI-совместимая ошибка: {"error":{message,type,param,code}}.
-// code - строковый машиночитаемый код (или null), как у OpenAI; не HTTP-статус.
+// OpenAI-compatible error: {"error":{message,type,param,code}}.
+// `code` is a machine-readable string (or null), as with OpenAI — not the HTTP status.
 void error_json(httplib::Response& res, int status, const std::string& type,
                 const std::string& msg, const std::string& code = "") {
     json err = {{"type", type}, {"message", msg}, {"param", nullptr}};
@@ -304,10 +307,10 @@ void extract_usage(const std::string& body, long long& prompt, long long& comple
         total = u["total_tokens"].get<long long>();
 }
 
-// Разделяемое состояние SSE-прокси: фоновый поток тянет ответ бэкенда, а
-// content-provider downstream отдаёт байты клиенту. Статус бэкенда становится
-// известен (headers_ready) ДО коммита стрим-ответа - так мы можем вернуть
-// обычную JSON-ошибку на не-2xx, не открывая text/event-stream.
+// Shared state of the SSE proxy: a background thread pulls the backend response while
+// the downstream content provider hands bytes to the client. The backend status becomes
+// known (headers_ready) BEFORE the streaming response is committed, so a non-2xx can
+// still be returned as a plain JSON error without opening a text/event-stream.
 struct StreamPump {
     std::mutex m;
     std::condition_variable cv;
@@ -315,21 +318,21 @@ struct StreamPump {
     bool headers_ready = false;
     int  status = 0;
     bool done = false;
-    bool ok = false;             // send() дошёл без транспортной ошибки
-    bool consumer_gone = false;  // клиент отвалился -> прекращаем тянуть бэкенд
+    bool ok = false;             // send() completed without a transport error
+    bool consumer_gone = false;  // client went away -> stop pulling from the backend
     size_t bytes_total = 0;
 };
 
-// Штатная остановка по сигналу: на гибель от сигнала C++ деструкторы не вызываются,
-// поэтому ловим SIGINT/SIGTERM и просим listen() вернуться -> отработает
-// ~BackendSupervisor и погасит дочерние llama-server (без осиротевших процессов).
+// Orderly shutdown on a signal: C++ destructors do not run when a process dies from a
+// signal, so SIGINT/SIGTERM are caught and listen() is asked to return -> ~BackendSupervisor
+// runs and shuts the child llama-server processes down (no orphans left behind).
 httplib::Server* g_active_srv = nullptr;
 void on_term(int) { if (g_active_srv) g_active_srv->stop(); }
 
-// SIGHUP = «журнал ротирован, переоткрой его» (logrotate: postrotate kill -HUP).
-// Обработчик только взводит lock-free флаг (async-signal-safe); сам reopen делает
-// поток-писатель аудита перед следующим батчем. Дефолтная реакция на SIGHUP —
-// смерть процесса, поэтому не перехватить его было бы опаснее, чем перехватить.
+// SIGHUP means "the journal was rotated, reopen it" (logrotate: postrotate kill -HUP).
+// The handler only raises a lock-free flag (async-signal-safe); the reopen itself is done
+// by the audit writer thread before its next batch. The default action for SIGHUP is to
+// kill the process, so not catching it would be more dangerous than catching it.
 AuditLog* g_active_audit = nullptr;
 void on_hup(int) { if (g_active_audit) g_active_audit->request_reopen(); }
 
@@ -339,17 +342,17 @@ void on_hup(int) { if (g_active_audit) g_active_audit->request_reopen(); }
 int GatewayServer::run() {
     httplib::Server svr;
 
-    // Ограничение параллелизма: SSE-стрим держит воркер на всё время потока,
-    // поэтому размер пула = потолок одновременных запросов.
+    // Concurrency cap: an SSE stream holds a worker for the whole duration of the stream,
+    // so the pool size is the ceiling on concurrent requests.
     if (cfg_.max_concurrent_requests > 0) {
         const int n = cfg_.max_concurrent_requests;
         svr.new_task_queue = [n] { return new httplib::ThreadPool(n); };
     }
 
-    // Периметровые лимиты. Без них: (1) slowloris — клиент шлёт заголовки/тело по
-    // байту и держит воркер вечно; (2) мёртвый потребитель SSE навсегда занимает
-    // воркер на sink.write; (3) гигантское тело -> OOM на json::parse. Таймауты
-    // освобождают воркер, лимит тела режет запрос до буферизации.
+    // Perimeter limits. Without them: (1) slowloris — a client sends headers/body one byte
+    // at a time and holds a worker forever; (2) a dead SSE consumer pins a worker on
+    // sink.write indefinitely; (3) a huge body -> OOM in json::parse. The timeouts free the
+    // worker; the body limit rejects the request before it is buffered.
     svr.set_read_timeout(cfg_.read_timeout_ms / 1000, (cfg_.read_timeout_ms % 1000) * 1000);
     svr.set_write_timeout(cfg_.write_timeout_ms / 1000, (cfg_.write_timeout_ms % 1000) * 1000);
     if (cfg_.max_body_bytes > 0)
@@ -359,13 +362,13 @@ int GatewayServer::run() {
     g_active_audit = &audit_;
     std::signal(SIGINT, on_term);
     std::signal(SIGTERM, on_term);
-    std::signal(SIGHUP, on_hup);     // ротация audit-журнала: переоткрыть по прежнему пути
-    std::signal(SIGPIPE, SIG_IGN);   // оборванный клиент при SSE не должен ронять gateway
-    std::signal(SIGXFSZ, SIG_IGN);   // лимит размера файла аудита -> EFBIG (fail-closed), а не kill
+    std::signal(SIGHUP, on_hup);     // audit journal rotation: reopen the same path
+    std::signal(SIGPIPE, SIG_IGN);   // a client dropping mid-SSE must not take the gateway down
+    std::signal(SIGXFSZ, SIG_IGN);   // audit file size limit -> EFBIG (fail-closed), not a kill
 
-    // Fail-closed при рантайм-сбое аудита: если журнал обязателен (audit.require=true)
-    // и поток-писатель фатально упал (диск полон/IO-ошибка), НЕ отдаём трафик, который
-    // не сможем записать. /health и /metrics оставляем, чтобы ops видели деградацию.
+    // Fail closed on a runtime audit failure: if the journal is mandatory (audit.require=true)
+    // and the writer thread died fatally (disk full / IO error), do NOT serve traffic that
+    // cannot be recorded. /health and /metrics stay up so operators can see the degradation.
     svr.set_pre_routing_handler(
         [this](const httplib::Request& req, httplib::Response& res) {
             if (cfg_.audit_require && audit_.failed() &&
@@ -377,7 +380,7 @@ int GatewayServer::run() {
             return httplib::Server::HandlerResponse::Unhandled;
         });
 
-    // health (без авторизации). Отражает и состояние аудита, чтобы деградация была видна.
+    // health (unauthenticated). Also reflects audit state so degradation is visible.
     svr.Get("/health", [this](const httplib::Request&, httplib::Response& res) {
         const bool audit_ok = !(cfg_.audit_require && audit_.failed());
         json h = {{"status", audit_ok ? "ok" : "degraded"},
@@ -387,14 +390,14 @@ int GatewayServer::run() {
         res.set_content(h.dump(), "application/json");
     });
 
-    // pull-метрики (без авторизации; контур закрытый), если включены конфигом
+    // pull metrics (unauthenticated; the deployment is a closed network), if enabled in config
     if (cfg_.metrics_enabled) {
         svr.Get(cfg_.metrics_path, [this](const httplib::Request&, httplib::Response& res) {
             res.set_content(render_metrics(), "text/plain; version=0.0.4");
         });
     }
 
-    // /v1/models — OpenAI-совместимый список (только модели, разрешённые роли)
+    // /v1/models — OpenAI-compatible listing (only models the role is allowed to see)
     svr.Get("/v1/models", [this](const httplib::Request& req, httplib::Response& res) {
         Principal pr;
         if (!authn_.verify(auth_token(req), pr)) { inc("errors_total{type=\"unauthorized\"}");
@@ -419,9 +422,9 @@ int GatewayServer::run() {
         res.set_content(json{{"object", "list"}, {"data", data}}.dump(), "application/json");
     });
 
-    // --- admin: управление моделями без перезапуска (доступ по RBAC: endpoint /admin/models) ---
+    // --- admin: manage models without a restart (RBAC-gated on the /admin/models endpoint) ---
 
-    // GET /admin/models — полный список со статусом (включая выключенные).
+    // GET /admin/models — the full list with status (including disabled models).
     svr.Get("/admin/models", [this](const httplib::Request& req, httplib::Response& res) {
         Principal pr;
         if (!authn_.verify(auth_token(req), pr)) { inc("errors_total{type=\"unauthorized\"}");
@@ -443,7 +446,7 @@ int GatewayServer::run() {
         res.set_content(json{{"object", "list"}, {"data", data}}.dump(), "application/json");
     });
 
-    // POST /admin/models/<name>/<enable|disable> — переключение в рантайме.
+    // POST /admin/models/<name>/<enable|disable> — flip a model at runtime.
     svr.Post(R"(/admin/models/([^/]+)/(enable|disable))",
              [this](const httplib::Request& req, httplib::Response& res) {
         Principal pr;
@@ -462,7 +465,8 @@ int GatewayServer::run() {
         if (!registry_.set_enabled(name, enable)) { inc("errors_total{type=\"model_not_found\"}");
             audit_event(pr, client_ip_of(req), "/admin/models", name, "deny", "model not found", 404);
             return error_json(res, 404, "invalid_request_error", "model not found: " + name); }
-        // disable управляемой модели -> гасим её llama-server (иначе висел бы до idle-таймаута).
+        // Disabling a managed model shuts its llama-server down (otherwise it would linger
+        // until the idle timeout).
         if (!enable) {
             ModelEntry me;
             if (registry_.get(name, me) && me.backend_url.empty()) supervisor_->stop(name);
@@ -472,17 +476,16 @@ int GatewayServer::run() {
         res.set_content(json{{"id", name}, {"enabled", enable}}.dump(), "application/json");
     });
 
-    // общий прокси на бэкенд llama-server (chat/completions, completions, embeddings, rerank)
+    // shared proxy to the llama-server backend (chat/completions, completions, embeddings, rerank)
     auto proxy = [this](const char* upstream_path, bool allow_stream) {
         return [this, upstream_path, allow_stream](const httplib::Request& req,
                                                    httplib::Response& res) {
             const std::string request_id = make_request_id();
             const long long started_ms = steady_ms();
-            // Счётчик запросов снимается в audit_event() - там он покрывает ВСЕ
-            // маршруты и несёт decision. Прежний inc(requests_total{path=...})
-            // здесь дублировал его для одних лишь прокси-эндпоинтов, да ещё с
-            // другим набором меток под тем же именем метрики (Prometheus такого
-            // не допускает).
+            // The request counter is taken in audit_event(), where it covers ALL routes
+            // and carries the decision. The previous inc(requests_total{path=...}) here
+            // duplicated it for the proxy endpoints only, and did so with a different
+            // label set under the same metric name — which Prometheus does not allow.
             Principal pr;
             if (!authn_.verify(auth_token(req), pr)) { inc("errors_total{type=\"unauthorized\"}");
                 audit_event({}, client_ip_of(req), upstream_path, "", "deny", "unauthorized", 401, request_id);
@@ -521,7 +524,7 @@ int GatewayServer::run() {
                                   "wrong_modality");
             }
 
-            // RBAC: роль должна допускать и endpoint, и модель (default-deny).
+            // RBAC: the role must permit both the endpoint and the model (default-deny).
             std::string reason;
             if (!rbac_.allow(pr.role, upstream_path, model, reason)) {
                 inc("errors_total{type=\"forbidden\"}");
@@ -529,13 +532,14 @@ int GatewayServer::run() {
                 return error_json(res, 403, "invalid_request_error", "forbidden: " + reason);
             }
 
-            // backend_url пуст -> модель управляемая: поднимаем процесс по требованию.
+            // An empty backend_url means the model is managed: start the process on demand.
             std::string backend = e.backend_url;
             const bool managed = backend.empty();
             const std::string logical = e.logical_name;
 
-            // RAII-токен активного запроса: release гарантирован даже при обрыве клиента
-            // (иначе счётчик active утёк бы и reaper никогда не выгрузил бы бэкенд).
+            // RAII token for the in-flight request: release is guaranteed even if the client
+            // disconnects (otherwise the active counter would leak and the reaper would never
+            // unload the backend).
             std::shared_ptr<void> active_token;
             if (managed) {
                 std::string serr;
@@ -550,7 +554,7 @@ int GatewayServer::run() {
                 active_token = std::shared_ptr<void>(nullptr, [sup, logical](void*) { sup->release(logical); });
             }
 
-            // подмена имени модели на имя бэкенда, если задано
+            // substitute the backend-side model name, if one is configured
             if (!e.upstream_model.empty()) body["model"] = e.upstream_model;
             bool stream = false;
             if (body.contains("stream")) {
@@ -561,7 +565,7 @@ int GatewayServer::run() {
                 }
                 stream = allow_stream && body.at("stream").get<bool>();
             }
-            if (!allow_stream) body.erase("stream");  // embeddings: не транслируем stream бэкенду
+            if (!allow_stream) body.erase("stream");  // embeddings: do not forward stream upstream
             const std::string out_body = body.dump();
 
             const int t_sec  = cfg_.request_timeout_ms / 1000;
@@ -595,7 +599,8 @@ int GatewayServer::run() {
                 return;
             }
 
-            // Стриминг: фоновый поток тянет ответ бэкенда, статус узнаём до коммита stream-ответа.
+            // Streaming: a background thread pulls the backend response; the status is known
+            // before the streaming response is committed.
             auto pump = std::make_shared<StreamPump>();
             std::thread([backend, upstream_path, fwd, out_body, t_sec, t_usec, pump] {
                 httplib::Client cli(backend);
@@ -637,8 +642,8 @@ int GatewayServer::run() {
                 ust = pump->status;
             }
 
-            // Ошибка ДО стрима (невалидные параметры / бэкенд недоступен) -> обычная JSON-ошибка,
-            // а не SSE внутри 200.
+            // An error BEFORE the stream (invalid parameters / backend unreachable) is returned
+            // as a plain JSON error, not as SSE inside a 200.
             if (ust < 200 || ust >= 300) {
                 std::string ebody; int st;
                 {
@@ -656,11 +661,11 @@ int GatewayServer::run() {
                 res.status = st;
                 if (!ebody.empty()) res.set_content(ebody, "application/json");
                 else error_json(res, st, "api_error", "backend returned an error");
-                return;  // active_token освобождается здесь
+                return;  // active_token is released here
             }
 
-            // 2xx: passthrough SSE. active_token живёт внутри provider -> release по завершении
-            // стрима (в т.ч. при обрыве клиента).
+            // 2xx: passthrough SSE. active_token lives inside the provider, so it is released
+            // when the stream finishes (including when the client disconnects).
             res.set_chunked_content_provider(
                 "text/event-stream",
                 [pump, active_token](size_t /*offset*/, httplib::DataSink& sink) {
@@ -679,7 +684,7 @@ int GatewayServer::run() {
                     }
                     const bool ok = pump->ok;
                     lk.unlock();
-                    if (!ok) {  // поток бэкенда оборвался: синтетическая ошибка + корректное завершение
+                    if (!ok) {  // the backend stream broke: synthetic error + clean termination
                         const char* ev =
                             "data: {\"error\":{\"message\":\"backend stream interrupted\","
                             "\"type\":\"api_error\",\"code\":null}}\n\ndata: [DONE]\n\n";

@@ -1,39 +1,39 @@
-# infcore — ротация audit-журнала. Положить в /etc/logrotate.d/infcore.
+# infcore — audit journal rotation. Install as /etc/logrotate.d/infcore.
 #
-# ВАЖНО про режим ротации. Шлюз держит fd журнала открытым всю жизнь процесса
-# (O_APPEND + fsync на каждый батч), поэтому:
+# IMPORTANT, about the rotation mode. The gateway keeps the journal fd open for the whole
+# life of the process (O_APPEND + fsync per batch), therefore:
 #
-#   * copytruncate НЕЛЬЗЯ: между copy и truncate теряются события. Для журнала,
-#     который является предметом аудита, потеря записи недопустима.
-#   * create (rename + новый файл) БЕЗ сигнала тоже нельзя: шлюз продолжит писать
-#     в переименованный fd, а новый файл останется пустым — весь аудит молча
-#     утечёт в архив.
+#   * copytruncate is NOT allowed: events are lost between the copy and the truncate. For a
+#     journal that is itself the subject of an audit, losing a record is unacceptable.
+#   * create (rename + a new file) WITHOUT a signal is not allowed either: the gateway keeps
+#     writing to the renamed fd and the new file stays empty — the entire audit trail leaks
+#     silently into the archive.
 #
-# Поэтому: rename + SIGHUP. По SIGHUP шлюз переоткрывает журнал по прежнему пути.
-# Переоткрытие происходит перед записью следующего события; если событий нет,
-# терять нечего — писать в переименованный файл всё равно некому.
+# Hence: rename + SIGHUP. On SIGHUP the gateway reopens the journal at the same path. The
+# reopen happens before the next event is written; if there are no events there is nothing
+# to lose, because nobody is writing to the renamed file anyway.
 #
-# Проверить, что ротация реально состоялась:
+# To check that rotation actually happened:
 #   curl -s localhost:8080/metrics | grep audit_reopen
-#   infcore_gateway_audit_reopens_total         должен вырасти
-#   infcore_gateway_audit_reopen_failures_total должен остаться 0
+#   infcore_gateway_audit_reopens_total         should go up
+#   infcore_gateway_audit_reopen_failures_total should stay at 0
 
 /var/log/infcore/audit.log {
     daily
-    rotate 90                # срок хранения задаётся требованиями к аудиту, не диском
-    dateext                  # audit.log-20260716 вместо audit.log.1 — искать по дате проще
+    rotate 90                # retention is set by audit requirements, not by disk size
+    dateext                  # audit.log-20260716 instead of audit.log.1 — easier to find by date
     dateformat -%Y%m%d
-    missingok                # журнал появляется при первом старте шлюза
+    missingok                # the journal appears on the gateway's first start
     notifempty
     compress
-    delaycompress            # текущий архив не жмём: он ещё может дописываться
-    create 0640 infcore infcore   # владелец = пользователь сервиса (см. systemd User=)
+    delaycompress            # the newest archive is left uncompressed: it may still be appended to
+    create 0640 infcore infcore   # owner = the service user (see systemd User=)
 
-    # НЕ copytruncate: см. выше.
+    # NOT copytruncate: see above.
     sharedscripts
     postrotate
-        # Переоткрыть журнал. systemctl reload -> ExecReload -> kill -HUP.
-        # Если юнит не установлен (запуск вручную/в контейнере) — шлём сигнал напрямую.
+        # Reopen the journal. systemctl reload -> ExecReload -> kill -HUP.
+        # If the unit is not installed (manual or containerised run), signal it directly.
         systemctl reload infcore-gateway.service 2>/dev/null \
             || pkill -HUP -x infcore_gateway 2>/dev/null \
             || true

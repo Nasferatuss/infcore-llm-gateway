@@ -1,7 +1,6 @@
-// infcore — лицензия MIT (см. LICENSE).
-// Реестр локальных моделей: logical_name -> {путь GGUF, модальность, провайдер, параметры}.
-// Идея заимствована из llm_gateway (Go): метаданные моделей + /admin/models.
-// Источник истины — config (offline, без скачивания весов).
+// infcore — MIT licence (see LICENSE).
+// A registry of local models: logical_name -> {GGUF path, modality, provider, parameters}.
+// The source of truth is the config (offline; weights are never downloaded).
 #pragma once
 
 #include <map>
@@ -14,36 +13,36 @@ namespace infcore {
 enum class Modality { Text, Embedding, Vision, Rerank };
 
 struct ModelEntry {
-    std::string logical_name;   // напр. "qwen3-moe-a3b"
-    std::string gguf_path;      // локальный путь к весам (для справки/будущего in-process)
-    std::string arch;           // напр. "qwen3moe" (из метаданных GGUF)
-    std::string backend_url;    // базовый URL бэкенда llama-server, напр. http://127.0.0.1:8081
-    std::string upstream_model; // имя модели на бэкенде (если отличается); по умолч. = logical_name
-    std::string mmproj_path;    // проектор mtmd для vision (--mmproj); обязателен для этой модальности
-    std::string sha256;         // ожидаемый SHA-256 GGUF (release integrity gate)
-    std::string mmproj_sha256;  // ожидаемый SHA-256 mmproj
-    std::string license;        // provenance/license metadata для release manifest
-    std::string source;         // provenance/source metadata для release manifest
+    std::string logical_name;   // e.g. "qwen3-moe-a3b"
+    std::string gguf_path;      // local path to the weights (for reference and future in-process use)
+    std::string arch;           // e.g. "qwen3moe" (from the GGUF metadata)
+    std::string backend_url;    // base URL of the llama-server backend, e.g. http://127.0.0.1:8081
+    std::string upstream_model; // model name on the backend, if it differs; defaults to logical_name
+    std::string mmproj_path;    // mtmd projector for vision (--mmproj); required for that modality
+    std::string sha256;         // expected SHA-256 of the GGUF (release integrity gate)
+    std::string mmproj_sha256;  // expected SHA-256 of the mmproj
+    std::string license;        // provenance/licence metadata for the release manifest
+    std::string source;         // provenance/source metadata for the release manifest
     int64_t     size_bytes = 0;
     int64_t     mmproj_size_bytes = 0;
     Modality    modality = Modality::Text;
     bool        enabled  = true;
     int32_t     n_ctx        = 8192;
-    // -1 = не передавать --n-gpu-layers бэкенду: llama.cpp сам подгонит offload
-    // под свободную VRAM. Любое явное значение эту авто-подгонку ОТКЛЮЧАЕТ
-    // (llama.cpp не переопределяет заданное пользователем), см. backend_supervisor.
+    // -1 means --n-gpu-layers is not passed to the backend: llama.cpp fits the offload to
+    // the free VRAM itself. Any explicit value DISABLES that auto-fit (llama.cpp does not
+    // override a user-supplied setting) — see backend_supervisor.
     int32_t     n_gpu_layers = 0;
 };
 
 const char* modality_to_string(Modality m);
 
-// Потокобезопасный реестр метаданных моделей. Загрузка/выгрузка контекстов —
-// на уровне gateway; здесь только каталог и валидация.
+// A thread-safe registry of model metadata. Loading and unloading contexts is the
+// gateway's job; this is only the catalogue and its validation.
 class ModelRegistry {
 public:
     void add(const ModelEntry& e);
     bool get(const std::string& logical_name, ModelEntry& out) const;
-    bool set_enabled(const std::string& logical_name, bool enabled);  // false если модели нет
+    bool set_enabled(const std::string& logical_name, bool enabled);  // false if there is no such model
     std::vector<ModelEntry> list() const;
 
 private:

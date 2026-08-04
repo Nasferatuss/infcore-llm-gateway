@@ -1,19 +1,21 @@
-# СКЕЛЕТ runtime-образа infcore (тег: infcore/base-runtime:1.7). Строго offline в бою.
-# ТОЛЬКО рантайм-библиотеки, без toolchain/SDK (минимальный attack surface).
-# Имена пакетов - под репозиторий вашей ОС (пример - Debian-подобная).
+# A SKELETON of the infcore runtime image (tag: infcore/base-runtime:1.7). Strictly offline
+# in production. Runtime libraries ONLY, no toolchain or SDK (minimal attack surface).
+# Package names follow your OS's repository (the example is Debian-like).
 
-# Как и в base-devel: публичный Debian, чтобы скелет собирался как есть.
+# As in base-devel: a public Debian so the skeleton builds as-is.
 FROM debian:12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libgomp1 libstdc++6 \
-      # Vulkan loader + ICD (при GGML_VULKAN=ON). ICD - под ваш GPU-драйвер.
+      # Vulkan loader + ICD (with GGML_VULKAN=ON). The ICD must match your GPU driver.
       libvulkan1 \
  && rm -rf /var/lib/apt/lists/*
 
-# CUDA runtime (при GGML_CUDA=ON) из внутреннего зеркала. Только runtime, не toolkit:
+# The CUDA runtime (with GGML_CUDA=ON) from the internal mirror. Runtime only, not the toolkit:
 #   RUN apt-get update && apt-get install -y cuda-cudart-12-4 libcublas-12-4 \
 #    && rm -rf /var/lib/apt/lists/*
-# Драйвер NVIDIA НЕ ставим - он пробрасывается nvidia-container-toolkit с хоста.
+# The NVIDIA driver is NOT installed — it is passed through from the host by
+# nvidia-container-toolkit.
 
-# Для CPU-only контура ни CUDA, ни Vulkan рантайм не нужны - оставьте только libgomp/libstdc++.
+# For a CPU-only deployment neither the CUDA nor the Vulkan runtime is needed — keep only
+# libgomp/libstdc++.

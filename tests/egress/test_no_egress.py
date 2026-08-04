@@ -1,9 +1,9 @@
-"""Egress-тест: offline-инвариант контура.
+"""Egress test: the deployment's offline invariant.
 
-Если задан INFCORE_GATEWAY_BIN, тест запускает реальный gateway в `unshare -rn`,
-делает запрос к управляемой модели через fake llama-server и проверяет, что child
-backend не наследует INFCORE_KEY_* секреты. Без бинаря остаётся preflight-проверка
-самого netns-механизма для dev-среды.
+If INFCORE_GATEWAY_BIN is set, the test runs a real gateway inside `unshare -rn`, issues a
+request to a managed model through the fake llama-server, and checks that the child backend
+does not inherit the INFCORE_KEY_* secrets. Without the binary it falls back to a preflight
+check of the netns mechanism itself, for dev environments.
 """
 import os
 import shutil
@@ -17,7 +17,7 @@ _NETNS_PREFLIGHT = textwrap.dedent(
     """
     import socket, subprocess, sys
     subprocess.run(["ip", "link", "set", "lo", "up"], check=False)
-    # 1) loopback обязан работать (внутренний трафик контура)
+    # 1) loopback must work (internal traffic)
     srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(1)
     port = srv.getsockname()[1]
     c = socket.socket()
@@ -27,7 +27,7 @@ _NETNS_PREFLIGHT = textwrap.dedent(
         print("LOOPBACK_FAIL", e); sys.exit(2)
     finally:
         c.close(); srv.close()
-    # 2) внешний адрес обязан быть недостижим (нет маршрута наружу == ноль egress)
+    # 2) an external address must be unreachable (no route out == zero egress)
     ext = socket.socket()
     try:
         ext.settimeout(2); ext.connect(("8.8.8.8", 53))
@@ -136,7 +136,7 @@ def _netns_available():
 @pytest.mark.egress
 def test_runtime_has_zero_egress():
     if not _netns_available():
-        pytest.skip("нужен Linux + unshare -rn (unprivileged netns) + iproute2")
+        pytest.skip("requires Linux + unshare -rn (unprivileged netns) + iproute2")
     child = _NETNS_PREFLIGHT
     env = None
     gateway = os.environ.get("INFCORE_GATEWAY_BIN")
@@ -154,5 +154,5 @@ def test_runtime_has_zero_egress():
         capture_output=True, text=True, timeout=45, env=env,
     )
     assert r.returncode == 0, (
-        f"offline-инвариант нарушен: rc={r.returncode} out={r.stdout!r} err={r.stderr!r}"
+        f"offline invariant violated: rc={r.returncode} out={r.stdout!r} err={r.stderr!r}"
     )

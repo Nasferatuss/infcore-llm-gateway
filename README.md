@@ -114,8 +114,27 @@ Build profiles: `profile-cpu.cmake` (no GPU), `profile-h100.cmake` (`sm_90`),
   supervisor token failure.
 - `tests/egress/` — asserts zero outbound traffic in a network namespace, plus a
   product smoke test.
+- `tests/manual/hardening_smoke.sh` — the production fixes, end to end against a
+  fake backend: the body-size limit, the gateway staying responsive while a
+  backend is `SIGTERM`→`SIGKILL`ed, a disable racing backend start-up, and
+  fail-closed behaviour when the audit sink breaks. No model and no GPU needed.
 - `tests/load/loadtest.py` — concurrency harness reporting latency
   percentiles (p50/p95/p99), TTFT, throughput and an error breakdown.
+
+All of the above except the load harness run in CI, on every push:
+
+| Job | What it establishes |
+|---|---|
+| `build (cpu profile) + unit tests` | The README Quickstart works from a clean box |
+| `hardening smoke (fake backend)` | The four hardening properties still hold |
+| `thread sanitizer` | No data race in the concurrent shutdown, start-up and audit paths — the locking invariants written in the sources are checked, not asserted |
+| `address sanitizer` | No memory error and no undefined behaviour on the same paths |
+| `test coverage` | ~60% of lines across infcore's own sources, measured over the unit tests and the hardening smoke together; the HTML report is a build artifact |
+
+Coverage is deliberately measured over both suites: the unit tests cover config
+parsing and schema validation, and the smoke test drives the running binary
+through the server, the supervisor and the security layer. The engine is
+excluded — it is vendored, unmodified and tested upstream.
 
 ## Relationship to llama.cpp
 
